@@ -3,10 +3,12 @@
 # Reads Claude Code's statusline JSON from stdin — no network, no auth, just jq.
 # Requires Claude Code v2.1.80+ (when rate_limits was added to statusline stdin).
 #
-# Themes: select via ~/.claude/plan-statusline.conf, e.g.:
-#   theme=default   # today's look (the safe one)
-#   theme=hearth    # warm amber, pulsing sparkle, model-name shimmer
-#   theme=glow      # bold bright neon-style, animated sparkle
+# Each theme renders the model name in its own solid color. Select via
+# ~/.claude/plan-statusline.conf, e.g.:
+#   theme=default   # basic ANSI; bold name
+#   theme=hearth    # warm amber, fixed-amber circles, silent until 70%
+#   theme=glow      # pink neon arcade, mint→magenta tier ramp
+#   theme=scrubs    # clinical teal vitals monitor
 # Missing or invalid theme → default.
 
 set -uo pipefail
@@ -17,44 +19,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-input=$(cat)
-
-# --- Config: read theme name from ~/.claude/plan-statusline.conf if present ---
-theme=default
-config_file="${HOME}/.claude/plan-statusline.conf"
-if [[ -f "$config_file" ]]; then
-  while IFS='=' read -r key value; do
-    key=${key// /}
-    value=${value// /}
-    value=${value%\"}; value=${value#\"}
-    case "$key" in
-      theme) [[ -n "$value" ]] && theme="$value" ;;
-    esac
-  done < "$config_file"
-fi
-
-# --- Parse stdin JSON (one jq call into 7 vars) ---
-# Join with the ASCII unit separator (\x1f), NOT @tsv: tab counts as IFS
-# *whitespace*, so bash `read` collapses consecutive tabs and empty fields
-# shift everything left (a missing context % once rendered the 1M window
-# size as "1000000%"). Non-whitespace delimiters preserve empty fields.
-IFS=$'\x1f' read -r model five_pct five_reset week_pct week_reset ctx_pct ctx_size < <(
-  printf '%s' "$input" | jq -r '[
-    .model.display_name // .model.id // "Claude",
-    .rate_limits.five_hour.used_percentage // "",
-    .rate_limits.five_hour.resets_at // "",
-    .rate_limits.seven_day.used_percentage // "",
-    .rate_limits.seven_day.resets_at // "",
-    .context_window.used_percentage // "",
-    .context_window.context_window_size // ""
-  ] | map(tostring) | join("\u001f")'
-)
-
 # ============================================================================
 # Shared helpers (used by every theme)
 # ============================================================================
-
-reset_color() { printf '\033[0m'; }
 
 # Format an epoch with a strftime string. BSD date (macOS) uses `-r`; GNU date (Linux/WSL) uses `-d @`.
 date_fmt() {
@@ -74,6 +41,29 @@ fmt_size() {
   if   ((n >= 1000000)); then printf '%dM' $((n / 1000000))
   elif ((n >= 1000));    then printf '%dk' $((n / 1000))
   else                        printf '%d' "$n"
+  fi
+}
+
+# Session cost in dollars -> "$1.01". jq always emits a dot-decimal, but printf's
+# %f parses AND formats in the current locale, so a comma-radix locale (de_DE …)
+# would both reject "1.009058" and print "$0,00". A *function-scoped* LC_ALL=C
+# pins the radix to '.' for the builtin (an inline `LC_ALL=C printf` prefix does
+# NOT take effect on bash 3.2, macOS's system bash); `local` restores it on return.
+fmt_cost() {
+  local usd=$1
+  [[ -z "$usd" ]] && return
+  local LC_ALL=C
+  printf '$%.2f' "$usd"
+}
+
+# Milliseconds of wall-clock -> compact "45s" / "2m16s" / "1h3m".
+fmt_duration() {
+  local ms=$1
+  [[ -z "$ms" ]] && return
+  local s=$(( ms / 1000 ))
+  if   (( s >= 3600 )); then printf '%dh%dm' $(( s / 3600 )) $(( (s % 3600) / 60 ))
+  elif (( s >= 60 ));   then printf '%dm%ds' $(( s / 60 )) $(( s % 60 ))
+  else                       printf '%ds' "$s"
   fi
 }
 
@@ -99,14 +89,6 @@ ctx_circle() {
   fi
 }
 
-# Sparkle frames pulse small ↔ large so the change between renders is dramatic
-# (a dot turning into a star is unmistakable, even at slow refresh cadence).
-SPARKLES=('·' '✦' '✶' '✦')
-sparkle_now() {
-  local frame=$(( $(date +%s) % ${#SPARKLES[@]} ))
-  printf '%s' "${SPARKLES[$frame]}"
-}
-
 # True when either rate limit is pegged at 100% — drives each theme's
 # 100% easter egg state (flatline, burnout, game over, skull).
 limit_pegged() {
@@ -114,395 +96,284 @@ limit_pegged() {
   { [[ -n "$week_pct" ]] && (( ${week_pct%.*} >= 100 )); }
 }
 
+# Render the model name in the theme's solid NAME_SGR (empty -> terminal default
+# fg). One opening SGR for the whole string, so the name is a single clean span.
+# At 100% plan usage the name "dies": dimmed, matching each theme's pegged
+# easter-egg state. (The statusline repaints at most ~1×/sec, far too coarse for
+# smooth motion, so the name is static rather than animated.)
+render_name() {
+  local text=$1
+  (( ${#text} == 0 )) && return
+  if limit_pegged; then
+    printf '\033[2m%s\033[0m' "$text"
+    return
+  fi
+  if [[ -n "$NAME_SGR" ]]; then
+    printf '\033[%sm%s\033[0m' "$NAME_SGR" "$text"
+  else
+    printf '%s' "$text"
+  fi
+}
+
 # ============================================================================
-# Theme: default — today's look (preserved exactly)
+# Theme loaders — each sets the globals render_line consumes. Pure data.
+# Tier thresholds are shared: urgent >=90, hot >=70, warn >=50, else calm.
+# Empty TIER_* = terminal default fg (used by hearth's silent calm/warn).
 # ============================================================================
 
-default_color() {
+theme_default() {            # basic ANSI, faithful to the original look
+  TIER_CALM=32; TIER_WARN=33; TIER_HOT='38;5;208'; TIER_URGENT=31
+  NAME_SGR='1'                                # bold, terminal default fg
+  SEP=' │ '; SEP_COLOR=''
+  META=''                                      # reset/size inherit tier color
+  SEG_CIRCLE=0; LABEL_SEP=':'
+  # '@tier' sentinel: circle/label color tracks the value's tier color (all-one-span).
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='100% 💀'; EGG_COLOR_A=31
+  EGG_MSG_B='100% 💀'; EGG_COLOR_B=31          # equal -> no flash
+  EGG_RESET_WORD='respawn'
+}
+
+theme_hearth() {             # warm amber, restrained (silent calm/warn)
+  TIER_CALM=''; TIER_WARN=''; TIER_HOT='38;5;208'; TIER_URGENT='1;38;5;196'
+  NAME_SGR='1;38;5;214'                               # bold amber
+  SEP=' · '; SEP_COLOR=2
+  META='2;3'                                   # dim italic
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='38;5;214'; LABEL_SGR=''
+  EGG_GLYPH='○'; EGG_GLYPH_COLOR=2
+  EGG_MSG_A='burnt out'; EGG_COLOR_A='1;38;5;196'
+  EGG_MSG_B='burnt out'; EGG_COLOR_B='1;38;5;196'
+  EGG_RESET_WORD='rekindles'
+}
+
+theme_glow() {               # pink neon arcade
+  TIER_CALM='1;38;5;41'; TIER_WARN='1;38;5;205'; TIER_HOT='1;38;5;199'; TIER_URGENT='1;38;5;197'
+  NAME_SGR='1;38;5;199'                                   # bold magenta
+  SEP=' · '; SEP_COLOR=2
+  META='3;38;5;175'                            # italic rose
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='GAME OVER';   EGG_COLOR_A='1;38;5;197'
+  EGG_MSG_B='INSERT COIN'; EGG_COLOR_B='1;38;5;199'   # flashes
+  EGG_RESET_WORD='1UP'
+}
+
+theme_scrubs() {             # clinical teal vitals monitor
+  TIER_CALM='38;5;30'; TIER_WARN='1;38;5;37'; TIER_HOT='38;5;214'; TIER_URGENT='1;38;5;196'
+  NAME_SGR='1;38;5;37'                              # bold bright teal
+  SEP=' · '; SEP_COLOR=2
+  META='3;38;5;152'                            # italic light teal
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='CODE BLUE';      EGG_COLOR_A='1;38;5;196'
+  EGG_MSG_B='▁▁▁▁▁▁▁▁▁';      EGG_COLOR_B='1;38;5;196'   # flashes (text <-> flat trace)
+  EGG_RESET_WORD='defib'
+}
+
+# ============================================================================
+# Shared renderer
+# ============================================================================
+
+# Wrap TEXT in an SGR if non-empty (self-terminating); else print plain.
+paint() {
+  local sgr=$1 text=$2
+  if [[ -n "$sgr" ]]; then printf '\033[%sm%s\033[0m' "$sgr" "$text"
+  else printf '%s' "$text"; fi
+}
+
+paint_sep() { paint "$SEP_COLOR" "$SEP"; }
+
+# SGR for a percentage by shared tier thresholds (may be empty = default fg).
+tier_color() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
-  if   ((pct >= 90)); then printf '\033[31m'
-  elif ((pct >= 70)); then printf '\033[38;5;208m'
-  elif ((pct >= 50)); then printf '\033[33m'
-  else                     printf '\033[32m'
+  if   (( pct >= 90 )); then printf '%s' "$TIER_URGENT"
+  elif (( pct >= 70 )); then printf '%s' "$TIER_HOT"
+  elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
+  else                       printf '%s' "$TIER_CALM"
   fi
 }
 
-render_default() {
-  local segments=()
-  segments+=("$(printf '\033[1m%s\033[0m' "$model")")
-
-  if [[ -n "$five_pct" ]]; then
-    local pct=${five_pct%.*}
-    if ((pct >= 100)); then
-      # 100% easter egg: you died. Respawn timer below.
-      segments+=("$(printf '\033[31m5h: 100%% 💀\033[0m') (respawn →$(fmt_time "$five_reset"))")
-    else
-      segments+=("$(default_color "$five_pct")5h: ${pct}%$(reset_color) (→$(fmt_time "$five_reset"))")
-    fi
+# SGR for a session cost (USD) by dollar thresholds, mapped onto the shared
+# TIER_* colors so each theme's ramp applies. Compared on the integer-dollar
+# part to dodge bash float math. Thresholds are tunable: calm <$2, warn >=$2,
+# hot >=$5, urgent >=$10.
+cost_tier_color() {
+  local usd=$1
+  [[ -z "$usd" ]] && return
+  local dollars=${usd%.*}; dollars=${dollars:-0}
+  if   (( dollars >= 10 )); then printf '%s' "$TIER_URGENT"
+  elif (( dollars >= 5 ));  then printf '%s' "$TIER_HOT"
+  elif (( dollars >= 2 ));  then printf '%s' "$TIER_WARN"
+  else                           printf '%s' "$TIER_CALM"
   fi
-
-  if [[ -n "$week_pct" ]]; then
-    local pct=${week_pct%.*}
-    if ((pct >= 100)); then
-      segments+=("$(printf '\033[31mweek: 100%% 💀\033[0m') (respawn →$(fmt_when "$week_reset"))")
-    else
-      segments+=("$(default_color "$week_pct")week: ${pct}%$(reset_color) (→$(fmt_when "$week_reset"))")
-    fi
-  fi
-
-  if [[ -n "$ctx_pct" ]]; then
-    local pct=${ctx_pct%.*}
-    local size_label=""
-    [[ -n "$ctx_size" ]] && size_label=" of $(fmt_size "$ctx_size")"
-    segments+=("$(default_color "$ctx_pct")$(ctx_circle "$ctx_pct") ${pct}%${size_label}$(reset_color)")
-  fi
-
-  if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" ]]; then
-    segments+=("usage data pending - make a request")
-  fi
-
-  local sep=" │ "
-  local out=""
-  local s
-  for s in "${segments[@]}"; do
-    [[ -n "$out" ]] && out+="$sep"
-    out+="$s"
-  done
-  printf '%b' "$out"
 }
 
-# ============================================================================
-# Theme: hearth — restrained warm
-#   • pulsing sparkle (· ↔ ✶) prefixes the model name
-#   • shimmer: one character of the model name is bolded per render, position
-#     rotates per second so the bright char "drifts" across the name
-#   • amber glyphs, dim italic reset times
-#   • tier color only kicks in for warn (orange) and urgent (bold red)
-# ============================================================================
+# Meta SGR: explicit META if set, else inherit the segment's tier SGR
+# (so default's reset times / size label match the value color, as before).
+meta_sgr() { if [[ -n "$META" ]]; then printf '%s' "$META"; else printf '%s' "$1"; fi; }
 
-H_AMBER='\033[38;5;214m'    # warm amber — visible on light & dark
-H_DIM='\033[2m'             # dim attribute — adapts to terminal bg
-H_DIM_IT='\033[2;3m'        # dim italic — adapts
-H_ORANGE='\033[38;5;208m'   # warning
-H_RED='\033[1;38;5;196m'    # bold red, urgent
-H_BOLD='\033[1m'
-H_NOBOLD='\033[22m'
-H_RESET='\033[0m'
+# Resolve a span-color spec against the value's tier color: '@tier' -> tier,
+# anything else (including '' = default fg) is used literally.
+span_sgr() { if [[ "$1" == '@tier' ]]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
 
-# Body text uses the terminal's default foreground so the theme reads on
-# both light and dark backgrounds. Tier colors only kick in for warn/urgent.
-hearth_tier_fg() {
-  local pct=${1%.*}
-  [[ -z "$pct" ]] && return  # empty = no color = terminal default
-  if   ((pct >= 90)); then printf '%b' "$H_RED"
-  elif ((pct >= 70)); then printf '%b' "$H_ORANGE"
+# A rate segment (5h / week). Circle, label, and value are painted as separate
+# spans so each can take its own color (hearth: amber circle, plain label,
+# tier value; others: all tier). Falls through to the easter egg at 100%.
+seg_rate() {
+  local label=$1 pctraw=$2 reset_str=$3
+  local pct=${pctraw%.*}
+  if (( pct >= 100 )); then egg "$label" "$reset_str"; return; fi
+  local tier; tier=$(tier_color "$pct")
+  if (( SEG_CIRCLE )); then
+    paint "$(span_sgr "$CIRCLE_SGR" "$tier")" "$(ctx_circle "$pct")"; printf ' '
   fi
-  # else: silent → text renders in default fg
+  paint "$(span_sgr "$LABEL_SGR" "$tier")" "${label}${LABEL_SEP}"
+  printf ' '
+  paint "$tier" "${pct}%"
+  printf ' '
+  paint "$(meta_sgr '')" "(→${reset_str})"
 }
 
-# Render TEXT with one character bolded; the bold position rotates per second
-# so a "shimmer" appears to drift across the text between renders. No color
-# applied — the terminal's default fg carries it on both light & dark bg.
-hearth_shimmer() {
-  local text=$1
-  local n=${#text}
-  (( n == 0 )) && { printf '%s' "$text"; return; }
-  local pos=$(( $(date +%s) % n ))
-  local i char
-  for ((i=0; i<n; i++)); do
-    char="${text:i:1}"
-    if (( i == pos )); then
-      printf '%b%s%b' "$H_BOLD" "$char" "$H_NOBOLD"
-    else
-      printf '%s' "$char"
-    fi
-  done
+# The context segment: always circled, no label / reset / egg. Circle uses
+# CIRCLE_SGR (hearth: amber; others: tier); value uses tier; size uses META
+# (or tier when META is empty, matching default's original look).
+seg_ctx() {
+  local pctraw=$1 size=$2
+  local pct=${pctraw%.*}
+  local tier; tier=$(tier_color "$pct")
+  paint "$(span_sgr "$CIRCLE_SGR" "$tier")" "$(ctx_circle "$pct")"; printf ' '
+  paint "$tier" "${pct}%"
+  [[ -n "$size" ]] && paint "$(meta_sgr "$tier")" "$size"
 }
 
-# 100% easter egg: the fire has gone out. The sparkle stops and a wisp of
-# smoke drifts up from the cold hearth (frames rise · → ˚ per second).
-HEARTH_SMOKE=('∙' '∘' '°' '˚')
-hearth_spark() {
-  if limit_pegged; then
-    local frame=$(( $(date +%s) % ${#HEARTH_SMOKE[@]} ))
-    printf '%b%s%b' "$H_DIM" "${HEARTH_SMOKE[$frame]}" "$H_RESET"
+# 100% easter egg for a rate segment. Flashes A<->B per second when they differ.
+# The label is colored like the message EXCEPT when LABEL_SGR is empty (hearth),
+# where it stays default-fg. The reset clause uses META, or plain when META is
+# empty (default), matching the originals.
+egg() {
+  local label=$1 reset_str=$2 msg col lblcol
+  if (( $(date +%s) % 2 )) && [[ "$EGG_MSG_A" != "$EGG_MSG_B" ]]; then
+    msg=$EGG_MSG_B; col=$EGG_COLOR_B
   else
-    printf '%b%s%b' "$H_AMBER" "$(sparkle_now)" "$H_RESET"
+    msg=$EGG_MSG_A; col=$EGG_COLOR_A
+  fi
+  [[ -n "$EGG_GLYPH" ]] && printf '\033[%sm%s\033[0m ' "$EGG_GLYPH_COLOR" "$EGG_GLYPH"
+  if [[ -n "$LABEL_SGR" ]]; then lblcol=$col; else lblcol=''; fi
+  paint "$lblcol" "${label}${LABEL_SEP}"
+  printf ' '
+  paint "$col" "$msg"
+  printf ' '
+  if [[ -n "$META" ]]; then
+    paint "$META" "(${EGG_RESET_WORD} →${reset_str})"
+  else
+    printf '(%s →%s)' "$EGG_RESET_WORD" "$reset_str"
   fi
 }
 
-# A pegged limit reads as a cold ember: dim hollow circle, "burnt out",
-# and the reset time becomes the rekindling.
-hearth_burnout() {
-  local label=$1 reset_label=$2
-  printf '%b○%b %s %bburnt out%b %b(rekindles →%s)%b' \
-    "$H_DIM" "$H_RESET" "$label" \
-    "$H_RED" "$H_RESET" \
-    "$H_DIM_IT" "$reset_label" "$H_RESET"
-}
+# The one renderer: swept model name, then any present segments joined by SEP.
+render_line() {
+  # Enterprise/managed payloads carry no rate_limits; default the fields they
+  # DO carry to empty so plan-mode callers under `set -u` (tests, etc.) that
+  # never set them don't trip the unbound-variable guard.
+  local cost_usd=${cost_usd:-} dur_ms=${dur_ms:-} \
+        lines_added=${lines_added:-} lines_removed=${lines_removed:-} \
+        in_tokens=${in_tokens:-} out_tokens=${out_tokens:-}
 
-render_hearth() {
-  if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" ]]; then
-    printf '%b%s%b %busage data pending - make a request%b' \
-      "$H_AMBER" "$(sparkle_now)" "$H_RESET" "$H_DIM_IT" "$H_RESET"
+  # Nothing to show yet (fresh session, before the first API response).
+  if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" && -z "$cost_usd" ]]; then
+    render_name "$model"; paint_sep
+    paint "$META" 'usage data pending - make a request'
     return
   fi
 
-  local sep
-  sep=$(printf '%b · %b' "$H_DIM" "$H_RESET")
+  render_name "$model"
 
-  printf '%s %s' "$(hearth_spark)" "$(hearth_shimmer "$model")"
-
-  if [[ -n "$five_pct" ]]; then
-    local pct=${five_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      hearth_burnout "5h" "$(fmt_time "$five_reset")"
-    else
-      printf '%b%s%b 5h %b%d%%%b %b(→%s)%b' \
-        "$H_AMBER" "$(ctx_circle "$five_pct")" "$H_RESET" \
-        "$(hearth_tier_fg "$five_pct")" "$pct" "$H_RESET" \
-        "$H_DIM_IT" "$(fmt_time "$five_reset")" "$H_RESET"
-    fi
+  if [[ -n "$five_pct" || -n "$week_pct" ]]; then
+    # Plan mode (Pro/Max): rolling rate-limit windows.
+    [[ -n "$five_pct" ]] && { paint_sep; seg_rate '5h' "$five_pct" "$(fmt_time "$five_reset")"; }
+    [[ -n "$week_pct" ]] && { paint_sep; seg_rate 'week' "$week_pct" "$(fmt_when "$week_reset")"; }
+  else
+    # Enterprise/managed mode: no rate windows exist in the payload. Show a
+    # session dashboard — each segment only if its data is present. Cost
+    # carries the green->red tier ramp (the headline); duration/lines/tokens
+    # are informational and ride META (plain in default, dim in other themes).
+    [[ -n "$cost_usd" ]] && { paint_sep; paint "$(cost_tier_color "$cost_usd")" "$(fmt_cost "$cost_usd")"; }
+    [[ -n "$dur_ms" ]]   && { paint_sep; paint "$(meta_sgr '')" "$(fmt_duration "$dur_ms")"; }
+    [[ -n "$lines_added" || -n "$lines_removed" ]] && \
+      { paint_sep; paint "$(meta_sgr '')" "+${lines_added:-0}/-${lines_removed:-0}"; }
+    [[ -n "$in_tokens" || -n "$out_tokens" ]] && \
+      { paint_sep; paint "$(meta_sgr '')" "$(fmt_size "${in_tokens:-0}")↑ $(fmt_size "${out_tokens:-0}")↓"; }
   fi
 
-  if [[ -n "$week_pct" ]]; then
-    local pct=${week_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      hearth_burnout "week" "$(fmt_when "$week_reset")"
-    else
-      printf '%b%s%b week %b%d%%%b %b(→%s)%b' \
-        "$H_AMBER" "$(ctx_circle "$week_pct")" "$H_RESET" \
-        "$(hearth_tier_fg "$week_pct")" "$pct" "$H_RESET" \
-        "$H_DIM_IT" "$(fmt_when "$week_reset")" "$H_RESET"
-    fi
-  fi
-
+  # Context fill renders in both modes (it is per-chat, not a plan limit).
   if [[ -n "$ctx_pct" ]]; then
-    local pct=${ctx_pct%.*}
-    local size_label=""
-    [[ -n "$ctx_size" ]] && size_label=" of $(fmt_size "$ctx_size")"
-    printf '%b' "$sep"
-    printf '%b%s%b %b%d%%%b%b%s%b' \
-      "$H_AMBER" "$(ctx_circle "$ctx_pct")" "$H_RESET" \
-      "$(hearth_tier_fg "$ctx_pct")" "$pct" "$H_RESET" \
-      "$H_DIM_IT" "$size_label" "$H_RESET"
+    local size=''; [[ -n "$ctx_size" ]] && size=" of $(fmt_size "$ctx_size")"
+    paint_sep; seg_ctx "$ctx_pct" "$size"
   fi
 }
 
 # ============================================================================
-# Theme: glow — pink neon arcade
-#   • Two hue families only: pink (the theme) + mint (cool counterpoint at
-#     calm). Sparkle and hot-tier share the same magenta on purpose — when
-#     usage climbs into the hot zone, the data lights up in the theme's
-#     signature color, then breaks to red at urgent for the alarm escape.
-#   • Bold weight + saturated 256-color values approximate "neon tube"
-#     since terminals can't text-shadow.
-#   • Italic rose halo for meta; dim middle-dot separators.
+# main — only runs when executed, not when sourced
 # ============================================================================
 
-G_NEON='\033[1;38;5;199m'   # bold magenta — signature theme color.
-                            #   Used for: sparkle (the bright headline tube)
-                            #   AND the hot tier (data joins the theme color
-                            #   when usage gets serious).
-G_MODEL='\033[1m'           # bold only — uses terminal default fg, adapts
-G_MINT='\033[1;38;5;41m'    # bold electric mint — calm tier, the only
-                            #   non-pink hue. Reads as "you're fine" without
-                            #   adding a third color family.
-G_PINK='\033[1;38;5;205m'   # bold light hot pink — warn tier, the on-ramp
-                            #   into the pink spectrum before it deepens to
-                            #   magenta at hot.
-G_RED='\033[1;38;5;197m'    # bold pink-red — urgent, the red end of the pink
-                            #   spectrum. Stays on theme (magenta hue family)
-                            #   while reading clearly as alarm. Pure 196 broke
-                            #   the palette identity; 197 keeps it inside.
-G_DIM='\033[2m'             # plain dim — separators only; adapts to bg
-G_META='\033[3;38;5;175m'   # italic desaturated rose — soft bloom halo. Lower
-                            #   luminance than the bright tubes so it reads as
-                            #   "the air around them glowing," not as data.
-G_RESET='\033[0m'
+main() {
+  input=$(cat)
 
-glow_tier_fg() {
-  local pct=${1%.*}
-  [[ -z "$pct" ]] && { printf '%b' "$G_MINT"; return; }
-  if   ((pct >= 90)); then printf '%b' "$G_RED"
-  elif ((pct >= 70)); then printf '%b' "$G_NEON"
-  elif ((pct >= 50)); then printf '%b' "$G_PINK"
-  else                     printf '%b' "$G_MINT"
+  # --- Config: read theme name from ~/.claude/plan-statusline.conf if present ---
+  theme=default
+  config_file="${HOME}/.claude/plan-statusline.conf"
+  if [[ -f "$config_file" ]]; then
+    while IFS='=' read -r key value; do
+      key=${key// /}
+      value=${value// /}
+      value=${value%\"}; value=${value#\"}
+      case "$key" in
+        theme) [[ -n "$value" ]] && theme="$value" ;;
+      esac
+    done < "$config_file"
   fi
+
+  # --- Parse stdin JSON (one jq call into 13 vars) ---
+  # First 7 are the Pro/Max plan fields; the last 6 are the Enterprise/managed
+  # fields (that payload has no rate_limits). Join with the ASCII unit separator
+  # (\x1f), NOT @tsv: tab counts as IFS *whitespace*, so bash `read` collapses
+  # consecutive tabs and empty fields shift everything left (a missing context %
+  # once rendered the 1M window size as "1000000%"). Non-whitespace delimiters
+  # preserve empty fields.
+  IFS=$'\x1f' read -r model five_pct five_reset week_pct week_reset ctx_pct ctx_size \
+    cost_usd dur_ms lines_added lines_removed in_tokens out_tokens < <(
+    printf '%s' "$input" | jq -r '[
+      .model.display_name // .model.id // "Claude",
+      .rate_limits.five_hour.used_percentage // "",
+      .rate_limits.five_hour.resets_at // "",
+      .rate_limits.seven_day.used_percentage // "",
+      .rate_limits.seven_day.resets_at // "",
+      .context_window.used_percentage // "",
+      .context_window.context_window_size // "",
+      .cost.total_cost_usd // "",
+      .cost.total_duration_ms // "",
+      .cost.total_lines_added // "",
+      .cost.total_lines_removed // "",
+      .context_window.total_input_tokens // "",
+      .context_window.total_output_tokens // ""
+    ] | map(tostring) | join("\u001f")'
+  )
+
+  # --- Dispatch: load theme data, render once ---
+  case "$theme" in
+    hearth) theme_hearth ;;
+    glow)   theme_glow ;;
+    scrubs) theme_scrubs ;;
+    default|*) theme_default ;;
+  esac
+  render_line
 }
 
-# 100% easter egg: the cabinet drops into attract mode. The segment flashes
-# between GAME OVER (alarm red-pink) and INSERT COIN (signature magenta) once
-# per second, and the reset time becomes the free credit — your 1UP.
-glow_gameover() {
-  local label=$1 reset_label=$2
-  local msg='GAME OVER' fg="$G_RED"
-  (( $(date +%s) % 2 )) && { msg='INSERT COIN'; fg="$G_NEON"; }
-  printf '%b%s %s%b %b(1UP →%s)%b' \
-    "$fg" "$label" "$msg" "$G_RESET" \
-    "$G_META" "$reset_label" "$G_RESET"
-}
-
-render_glow() {
-  if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" ]]; then
-    printf '%b%s%b %busage data pending - make a request%b' \
-      "$G_NEON" "$(sparkle_now)" "$G_RESET" "$G_META" "$G_RESET"
-    return
-  fi
-
-  local sep
-  sep=$(printf '%b · %b' "$G_DIM" "$G_RESET")
-
-  printf '%b%s%b %b%s%b' \
-    "$G_NEON" "$(sparkle_now)" "$G_RESET" \
-    "$G_MODEL" "$model" "$G_RESET"
-
-  if [[ -n "$five_pct" ]]; then
-    local pct=${five_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      glow_gameover "5h" "$(fmt_time "$five_reset")"
-    else
-      printf '%b%s 5h %d%%%b %b(→%s)%b' \
-        "$(glow_tier_fg "$five_pct")" "$(ctx_circle "$five_pct")" "$pct" "$G_RESET" \
-        "$G_META" "$(fmt_time "$five_reset")" "$G_RESET"
-    fi
-  fi
-
-  if [[ -n "$week_pct" ]]; then
-    local pct=${week_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      glow_gameover "week" "$(fmt_when "$week_reset")"
-    else
-      printf '%b%s week %d%%%b %b(→%s)%b' \
-        "$(glow_tier_fg "$week_pct")" "$(ctx_circle "$week_pct")" "$pct" "$G_RESET" \
-        "$G_META" "$(fmt_when "$week_reset")" "$G_RESET"
-    fi
-  fi
-
-  if [[ -n "$ctx_pct" ]]; then
-    local pct=${ctx_pct%.*}
-    local size_label=""
-    [[ -n "$ctx_size" ]] && size_label=" of $(fmt_size "$ctx_size")"
-    printf '%b' "$sep"
-    printf '%b%s %d%%%b%b%s%b' \
-      "$(glow_tier_fg "$ctx_pct")" "$(ctx_circle "$ctx_pct")" "$pct" "$G_RESET" \
-      "$G_META" "$size_label" "$G_RESET"
-  fi
-}
-
-# ============================================================================
-# Theme: scrubs — clinical teal vitals monitor
-#   • Surgical-scrubs teal as the calm/normal state; the line reads like a
-#     patient-vitals display. Brand-clean clinical palette (teal primaries
-#     + soft light-teal halo), with universal monitor-alarm colors (amber,
-#     red) reserved for when usage actually climbs — so the teal dominates
-#     the healthy range you sit in most of the time.
-#   • A health-cross "heartbeat" pulses in place of the model-name sparkle.
-# ============================================================================
-
-S_TEAL='\033[38;5;30m'      # teal (#008787) — calm/normal tier, the resting vital
-S_BRIGHT='\033[1;38;5;37m'  # bold bright teal (#00afaf) — heartbeat + elevated tier
-S_AMBER='\033[38;5;214m'    # amber (#ffaf00) — caution tier, monitor alarm yellow
-S_RED='\033[1;38;5;196m'    # bold red (#ff0000) — critical tier, the alarm
-S_META='\033[3;38;5;152m'   # italic light teal (#afd7d7) — soft halo for reset times
-S_DIM='\033[2m'             # plain dim — separators only; adapts to bg
-S_BOLD='\033[1m'            # bold only — model name, uses terminal default fg
-S_RESET='\033[0m'
-
-# Health-cross heartbeat: dot → thin plus → heavy cross → thin plus. Pulses
-# once per second so the "·" swelling into "✚" reads as a vital sign ticking.
-SCRUBS_BEAT=('·' '+' '✚' '+')
-
-scrubs_beat() {
-  # No pulse on a coded patient: the heartbeat flatlines.
-  limit_pegged && { printf '─'; return; }
-  local frame=$(( $(date +%s) % ${#SCRUBS_BEAT[@]} ))
-  printf '%s' "${SCRUBS_BEAT[$frame]}"
-}
-
-# 100% easter egg: the monitor calls a code. The segment flashes between the
-# alarm call and a flat trace once per second, and the reset time becomes the
-# defib charge time ("when the paddles bring you back").
-scrubs_flatline() {
-  local label=$1 reset_label=$2
-  local msg='CODE BLUE'
-  (( $(date +%s) % 2 )) && msg='▁▁▁▁▁▁▁▁▁'
-  printf '%b%s %s%b %b(defib →%s)%b' \
-    "$S_RED" "$label" "$msg" "$S_RESET" \
-    "$S_META" "$reset_label" "$S_RESET"
-}
-
-scrubs_tier_fg() {
-  local pct=${1%.*}
-  [[ -z "$pct" ]] && { printf '%b' "$S_TEAL"; return; }
-  if   ((pct >= 90)); then printf '%b' "$S_RED"
-  elif ((pct >= 70)); then printf '%b' "$S_AMBER"
-  elif ((pct >= 50)); then printf '%b' "$S_BRIGHT"
-  else                     printf '%b' "$S_TEAL"
-  fi
-}
-
-render_scrubs() {
-  if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" ]]; then
-    printf '%b%s%b %busage data pending - make a request%b' \
-      "$S_BRIGHT" "$(scrubs_beat)" "$S_RESET" "$S_META" "$S_RESET"
-    return
-  fi
-
-  local sep
-  sep=$(printf '%b · %b' "$S_DIM" "$S_RESET")
-
-  printf '%b%s%b %b%s%b' \
-    "$S_BRIGHT" "$(scrubs_beat)" "$S_RESET" \
-    "$S_BOLD" "$model" "$S_RESET"
-
-  if [[ -n "$five_pct" ]]; then
-    local pct=${five_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      scrubs_flatline "5h" "$(fmt_time "$five_reset")"
-    else
-      printf '%b%s 5h %d%%%b %b(→%s)%b' \
-        "$(scrubs_tier_fg "$five_pct")" "$(ctx_circle "$five_pct")" "$pct" "$S_RESET" \
-        "$S_META" "$(fmt_time "$five_reset")" "$S_RESET"
-    fi
-  fi
-
-  if [[ -n "$week_pct" ]]; then
-    local pct=${week_pct%.*}
-    printf '%b' "$sep"
-    if (( pct >= 100 )); then
-      scrubs_flatline "week" "$(fmt_when "$week_reset")"
-    else
-      printf '%b%s week %d%%%b %b(→%s)%b' \
-        "$(scrubs_tier_fg "$week_pct")" "$(ctx_circle "$week_pct")" "$pct" "$S_RESET" \
-        "$S_META" "$(fmt_when "$week_reset")" "$S_RESET"
-    fi
-  fi
-
-  if [[ -n "$ctx_pct" ]]; then
-    local pct=${ctx_pct%.*}
-    local size_label=""
-    [[ -n "$ctx_size" ]] && size_label=" of $(fmt_size "$ctx_size")"
-    printf '%b' "$sep"
-    printf '%b%s %d%%%b%b%s%b' \
-      "$(scrubs_tier_fg "$ctx_pct")" "$(ctx_circle "$ctx_pct")" "$pct" "$S_RESET" \
-      "$S_META" "$size_label" "$S_RESET"
-  fi
-}
-
-# ============================================================================
-# Dispatch
-# ============================================================================
-
-case "$theme" in
-  hearth)         render_hearth ;;
-  glow)           render_glow ;;
-  scrubs)         render_scrubs ;;
-  default|*)      render_default ;;
-esac
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
+fi

@@ -1,61 +1,115 @@
 # claude-code-plan-statusline
 
-A tiny Claude Code statusline that shows my **actual plan rate-limit usage** - the same numbers `/usage` shows, but always visible at the bottom of the terminal.
+A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keeps your **actual plan rate-limit usage** at the bottom of the terminal — the same numbers `/usage` reports, without typing `/usage`. No network calls, no auth, no dollar-cost guesswork.
 
 ![statusline screenshot](screenshot.png)
 
-Reading left to right:
+- **Real plan usage, not dollar cost** — your 5-hour and weekly rate-limit windows and when they reset, read straight from Claude Code's own data.
+- **Pro, Max, and Enterprise** — auto-detects your plan: rate-limit windows on Pro/Max, a session dashboard (cost · duration · tokens) on managed/Enterprise plans that have no windows.
+- **Per-chat context gauge** — how full the current conversation's context window is, at a glance.
+- **Four built-in themes** — switch instantly with no restart, or ask Claude Code to invent a new one.
+- **No network, no auth** — reads only the JSON Claude Code already pipes in; never touches your credentials.
+- **Portable** — macOS, Linux, and WSL; Bash 3.2+; one dependency (`jq`).
 
-- **Model name** in bold — whatever Claude Code is calling the active model (e.g. `Opus 4.7 (1M context)`).
+## Why plan usage, not dollar cost
+
+Most Claude Code statusline plugins show **API-equivalent dollar cost** — your token counts multiplied by Anthropic's pay-per-use API rates. That's useful if you pay for the API, but on Pro or Max it's beside the point: the limit that actually bites is your plan's **rate-limit window**, not a dollar figure.
+
+This statusline shows the window instead — how much of your rolling allowances you've spent and when they reset. It reads that straight from the JSON Claude Code already hands the statusline command, so unlike tools that poll an Anthropic OAuth endpoint with your stored credentials, it makes **no network calls and never reads your auth token**.
+
+## What it shows
+
+Reading the Pro/Max line left to right:
+
+- **Model name** — whatever Claude Code is calling the active model (e.g. `Opus 4.8 (1M context)`), in the active theme's color.
 - **`5h: 14% (→11:00am)`** — your 5-hour rolling plan window and when it resets (local time).
-- **`week: 47% (→thu)`** — your 7-day rolling plan window. Shows the time if the reset is today, the lowercase weekday otherwise, so you can tell at a glance whether the limit comes back today or in a few days.
-- **`○ 6% of 1M`** — context-window fill for *the current chat*. This is **not** a plan limit. It's how much of the model's working memory this conversation has consumed (6% of 1,000,000 tokens here). It grows monotonically as the chat gets longer; there's no time-based reset — starting a new chat is what clears it. The circle (`○ ◔ ◑ ◕ ●`) is a five-step visual of the same percentage, mostly so you can spot the trend without reading the number.
+- **`week: 47% (→thu)`** — your 7-day rolling window. It shows a clock time when the reset is today and the lowercase weekday otherwise, so you can tell at a glance whether the limit comes back today or in a few days.
+- **`○ 6% of 1M`** — context-window fill for *the current chat*. This is **not** a plan limit — it's how much of the model's working memory the conversation has consumed (6% of 1,000,000 tokens here). It only grows as the chat gets longer; starting a new chat clears it. The circle (`○ ◔ ◑ ◕ ●`) is a five-step visual of the same percentage.
 
-All three percentages share the same color scale: green → yellow → orange → red as they climb.
+All three percentages share one color scale: green → yellow → orange → red as they climb.
+
+On Enterprise/managed plans the layout adapts automatically — see [Enterprise / managed plans](#enterprise--managed-plans).
+
+## Install
+
+### Let Claude Code install it (easiest)
+
+Open any Claude Code session and paste:
+
+> Please install the plan-statusline from https://github.com/blazemalan/claude-code-plan-statusline for me:
+> 1. Download https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.sh to `~/.claude/hooks/plan-statusline.sh` and make it executable.
+> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `bash ~/.claude/hooks/plan-statusline.sh`, preserving all existing keys.
+> 3. Make sure `jq` is installed (`brew install jq` if not).
+
+Claude Code does the file work and the settings edit, asking permission as it goes.
+
+### Manual install
+
+```bash
+mkdir -p ~/.claude/hooks
+curl -fsSL https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.sh \
+  -o ~/.claude/hooks/plan-statusline.sh
+chmod +x ~/.claude/hooks/plan-statusline.sh
+```
+
+Then merge this into `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/hooks/plan-statusline.sh"
+  }
+}
+```
+
+Start a new Claude Code session and make a request — the statusline appears at the next refresh.
 
 ## Themes
 
-Three themes ship in the box. Pick one by creating `~/.claude/plan-statusline.conf`:
+Four themes ship in the box. Select one by creating `~/.claude/plan-statusline.conf`:
 
 ```
 theme=hearth
 ```
 
-No restart needed — the statusline reads the config on every refresh, so the new theme shows up within a few seconds.
+No restart needed — the statusline re-reads the config on every refresh, so a new theme shows up within a few seconds.
 
-| Theme    | What it looks like                                                                    |
-|----------|---------------------------------------------------------------------------------------|
-| `default`| Today's look — basic ANSI colors, pipe separators, single circle on context.          |
-| `hearth` | Warm amber, restrained. Pulsing sparkle prefixes the model name and a "shimmer" character drifts across it between renders. Dim italic reset times. |
-| `glow`   | Pink neon arcade. Magenta sparkle, mint→pink→magenta→red tier ramp through the pink spectrum, italic rose halo on every reset time. Two-hue palette, no warm clutter. |
-| `scrubs` | Clinical teal vitals monitor. A health-cross "heartbeat" pulses by the model name; surgical-teal calm state ramps teal→bright-teal→amber→red like a patient monitor. Soft light-teal halo on reset times. |
+| Theme     | Look                                                                                                                |
+|-----------|---------------------------------------------------------------------------------------------------------------------|
+| `default` | Basic ANSI colors, pipe separators, single context circle. Bold model name.                                         |
+| `hearth`  | Warm amber, restrained. Bold-amber name; tier color stays silent until 70% (orange) / 90% (red); dim italic reset times. |
+| `glow`    | Pink neon arcade. Bold-magenta name; mint→pink→magenta→red tier ramp; italic rose reset times.                      |
+| `scrubs`  | Clinical teal vitals monitor. Bold bright-teal name; teal→bright→amber→red ramp; soft light-teal reset times.       |
 
-If the file is missing or the theme name is unrecognized, the script falls back to `default` — your prior install keeps working untouched.
+The model name renders in each theme's solid color (at 100% plan usage it dims, part of the per-theme easter egg). If the config file is missing or names an unknown theme, the statusline falls back to `default`.
 
-### Just ask Claude Code
+### Ask Claude Code to theme it
 
-You don't have to edit anything by hand. Once this statusline is installed, ask Claude Code in plain English:
+Once installed, you can change the look in plain English instead of editing files:
 
 - *"switch my statusline to glow"* / *"go back to the default theme"*
 - *"make me a new statusline theme — ocean blues, calm"*
 
-It edits `~/.claude/plan-statusline.conf` (or adds a new render function to the script) for you, and since the statusline re-reads on every refresh, the change appears within a few seconds — no restart required.
+Claude Code edits `~/.claude/plan-statusline.conf` (or adds a new render function to the script); the change appears within a few seconds, no restart required.
 
-## Why this exists
+## Enterprise / managed plans
 
-I'm on a Claude Max plan. I wanted a glanceable answer to "how close am I to hitting the limit?" without typing `/usage` every five minutes.
+Managed and Enterprise deployments don't receive a `rate_limits` block — there are no rolling plan windows to show. Rather than render blank, the statusline detects this and falls back to a **session dashboard** built from the data those payloads do carry:
 
-Most "Claude Code statusline" plugins show **API-equivalent dollar cost** - they multiply your token counts by Anthropic's pay-per-use API rates. Useful if you're paying for the API. Irrelevant if you're on Pro or Max, where the limit that actually matters is your plan's rate-limit window, not a dollar figure.
+```
+Opus 4.8 (1M context) │ $1.01 │ 2m16s │ +1/-0 │ 63k↑ 248↓ │ ○ 6% of 1M
+```
 
-The one plugin I found that does show real plan usage works by curl-ing an Anthropic OAuth endpoint every 60 seconds, reading your stored credentials to do it. I didn't want to pipe an unvetted shell script my auth token, so I wrote my own.
+Left to right: **session cost** (API-equivalent USD), **wall-clock duration**, **lines changed**, **tokens in ↑ / out ↓**, and the same context circle. Cost carries the green→red scale (green `<$2`, yellow `≥$2`, orange `≥$5`, red `≥$10` — tunable in `cost_tier_color`); the rest render dimmed. Detection is automatic and needs no config: rate limits present → the `5h`/`week` view; absent → the dashboard. One script serves both.
 
 ## How it works
 
-Since Claude Code v2.1.80, the statusline command receives a JSON blob on stdin with the same data `/usage` shows, plus per-chat context-window stats:
+Since Claude Code v2.1.80, the statusline command receives a JSON blob on stdin with the same data `/usage` shows, plus per-chat context stats:
 
 ```json
 {
-  "model": { "display_name": "Opus 4.7" },
+  "model": { "display_name": "Opus 4.8" },
   "rate_limits": {
     "five_hour": { "used_percentage": 83, "resets_at": 1746234000 },
     "seven_day": { "used_percentage": 52, "resets_at": 1746500400 }
@@ -67,60 +121,26 @@ Since Claude Code v2.1.80, the statusline command receives a JSON blob on stdin 
 }
 ```
 
-The script reads that with `jq`, picks the percentages and reset epochs, color-formats them, and prints. No network. No auth. ~100 lines of bash.
+The script parses it with `jq`, picks the percentages and reset epochs, color-formats them, and prints. No network, no auth. One data-driven renderer feeds every theme.
 
-The `rate_limits` field only appears for Pro/Max subscribers, and only after the first API response in a session. Before then the script prints `usage data pending - make a request`.
-
-## Install
-
-### Easiest: let Claude Code install it for you
-
-Open any Claude Code session and paste this prompt:
-
-```
-Please install the plan-statusline from https://github.com/blazemalan/claude-code-plan-statusline for me. Specifically:
-
-1. Download https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.sh to ~/.claude/hooks/plan-statusline.sh and make it executable.
-2. Add a "statusLine" entry to ~/.claude/settings.json so it runs `bash ~/.claude/hooks/plan-statusline.sh`. Preserve all existing keys in that file.
-3. Make sure jq is installed (brew install jq if it isn't).
-```
-
-That's it. Claude Code will do the file work and the settings edit, ask for permission as it goes, and tell you when it's ready.
-
-### Manual install
-
-If you'd rather do it yourself:
-
-```bash
-mkdir -p ~/.claude/hooks
-curl -fsSL https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.sh \
-  -o ~/.claude/hooks/plan-statusline.sh
-chmod +x ~/.claude/hooks/plan-statusline.sh
-```
-
-Then add this to `~/.claude/settings.json` (merge with whatever's already there):
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/hooks/plan-statusline.sh"
-  }
-}
-```
-
-Start a new Claude Code session, make a request, and the bars appear.
+The `rate_limits` field appears only for Pro/Max subscribers, and only after the first API response in a session — until then the statusline shows `usage data pending - make a request`. (Enterprise/managed plans never send it; see [above](#enterprise--managed-plans).)
 
 ## Requirements
 
-- **macOS, Linux, or WSL** (the script handles both BSD `date -r` and GNU `date -d @`)
+- macOS, Linux, or WSL (handles both BSD `date -r` and GNU `date -d @`)
 - Claude Code v2.1.80 or later
-- `jq` (preinstalled on macOS; `brew install jq` if missing)
+- `jq` (preinstalled on macOS; `brew install jq` otherwise)
 - Bash 3.2+
 
-## How I made it
+## Development
 
-Vibes.
+The renderer is data-driven: each theme is just a set of variables consumed by a single `render_line`. The tests are plain Bash and need no framework:
+
+```bash
+bash tests/unit.sh        # sourceable helpers (formatting, circles, name rendering)
+bash tests/dispatch.sh    # theme dispatch + render faithfulness across themes
+bash tests/enterprise.sh  # Enterprise fallback + plan/enterprise mode exclusivity
+```
 
 ## License
 

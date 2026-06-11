@@ -17,8 +17,8 @@ mkdir -p "$TMP/.claude"
 ESC=$(printf '\033')
 
 # Strip CSI escape sequences (\033[...m) so substring matching works across
-# themes that interleave ANSI codes inside the model name (e.g. hearth's
-# shimmer bolds one character per second, breaking the literal "Opus 4.8").
+# the colored segments (model name, tier-colored values, separators) without
+# tripping on the SGR codes interleaved between them.
 strip_ansi() { sed -E "s/${ESC}\[[0-9;]*m//g"; }
 
 assert_renders() {
@@ -62,6 +62,95 @@ assert_renders "" "$SAMPLE" "Opus 4.8"
 for t in "${THEMES[@]}"; do
   assert_renders "$t" "$EMPTY" "usage data pending"
 done
+
+PEGGED='{"model":{"display_name":"Opus 4.8"},"rate_limits":{"five_hour":{"used_percentage":100,"resets_at":1746234000},"seven_day":{"used_percentage":78,"resets_at":1746500400}},"context_window":{"used_percentage":15,"context_window_size":1000000}}'
+
+# --- render_line faithfulness (TZ-independent substrings) ---
+# Drive render_line directly by sourcing, loading a theme, setting parsed vars.
+render_check() {
+  local theme=$1 expect=$2
+  local plain
+  plain=$(
+    five_pct=42 five_reset=1746234000 \
+    week_pct=78 week_reset=1746500400 \
+    ctx_pct=15 ctx_size=1000000 model='Opus 4.8' \
+    bash -c "source ./statusline.sh; theme_$theme; render_line" | strip_ansi
+  )
+  if [[ "$plain" != *"$expect"* ]]; then
+    printf 'FAIL render theme=%-8s expected %q\n  got: %s\n' "$theme" "$expect" "$plain" >&2
+    return 1
+  fi
+  printf 'PASS render theme=%-8s (matched %q)\n' "$theme" "$expect"
+}
+
+render_check default "5h: 42%"
+render_check default "◔ 15% of 1M"
+for t in hearth glow scrubs; do
+  render_check "$t" "◑ 5h 42%"
+  render_check "$t" "◕ week 78%"
+done
+
+egg_check() {
+  local theme=$1 expect=$2 plain
+  plain=$(
+    five_pct=100 five_reset=1746234000 \
+    week_pct=78 week_reset=1746500400 \
+    ctx_pct=15 ctx_size=1000000 model='Opus 4.8' \
+    bash -c "source ./statusline.sh; theme_$theme; render_line" | strip_ansi
+  )
+  [[ "$plain" == *"$expect"* ]] && printf 'PASS egg theme=%-8s (%q)\n' "$theme" "$expect" \
+    || { printf 'FAIL egg theme=%-8s expected %q got: %s\n' "$theme" "$expect" "$plain" >&2; return 1; }
+}
+egg_check default respawn
+egg_check hearth rekindles
+egg_check glow 1UP
+egg_check scrubs defib
+
+# --- ANSI-aware faithfulness guards (the strip_ansi checks miss color bugs) ---
+raw_render() {
+  local theme=$1
+  five_pct=${2:-42} five_reset=1746234000 \
+  week_pct=78 week_reset=1746500400 \
+  ctx_pct=15 ctx_size=1000000 model='Opus 4.8' \
+  bash -c "source ./statusline.sh; theme_$theme; render_line"
+}
+ESC2=$(printf '\033')
+
+# hearth: the circle stays amber (38;5;214) even at calm where the value is default-fg.
+h=$(raw_render hearth 42)
+[[ "$h" == *"${ESC2}[38;5;214m◑"* ]] && printf 'PASS hearth amber circle\n' \
+  || { printf 'FAIL hearth amber circle\n  got: %s\n' "$h" >&2; exit 1; }
+
+# hearth at hot (78%): label "5h" is plain, value is orange (38;5;208).
+hh=$(raw_render hearth 78)
+[[ "$hh" == *"${ESC2}[0m 5h ${ESC2}[38;5;208m78%"* ]] && printf 'PASS hearth plain label + orange value\n' \
+  || { printf 'FAIL hearth label/value color\n  got: %s\n' "$hh" >&2; exit 1; }
+
+# default: rate-segment reset time is PLAIN (value reset, space, uncolored "(→").
+d=$(raw_render default 42)
+[[ "$d" == *"${ESC2}[0m (→"* ]] && printf 'PASS default plain rate reset-time\n' \
+  || { printf 'FAIL default rate reset-time should be plain\n  got: %s\n' "$d" >&2; exit 1; }
+
+# default: ctx size IS tier-colored (green 32 at calm).
+[[ "$d" == *"${ESC2}[32m of 1M"* ]] && printf 'PASS default ctx size tier-colored\n' \
+  || { printf 'FAIL default ctx size should be tier-colored\n  got: %s\n' "$d" >&2; exit 1; }
+
+# glow: circle uses tier (mint 1;38;5;41) at calm — confirms @tier resolves, no fixed color.
+g=$(raw_render glow 42)
+[[ "$g" == *"${ESC2}[1;38;5;41m◑"* ]] && printf 'PASS glow tier circle\n' \
+  || { printf 'FAIL glow tier circle\n  got: %s\n' "$g" >&2; exit 1; }
+
+# hearth egg: label "5h" stays plain, message red (1;38;5;196).
+he=$(raw_render hearth 100)
+[[ "$he" == *"5h ${ESC2}[1;38;5;196mburnt out"* ]] && printf 'PASS hearth egg plain label\n' \
+  || { printf 'FAIL hearth egg label should be plain\n  got: %s\n' "$he" >&2; exit 1; }
+
+# Pegged state flows through the real dispatch -> render_line -> egg (stable reset words).
+assert_renders default "$PEGGED" "respawn"
+assert_renders hearth  "$PEGGED" "rekindles"
+assert_renders glow    "$PEGGED" "1UP"
+assert_renders scrubs  "$PEGGED" "defib"
+assert_renders default "$PEGGED" "100% 💀"
 
 echo
 echo "All dispatch tests passed."

@@ -11,6 +11,12 @@
 
 set -uo pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+  printf '\033[31mplan-statusline requires jq to parse data (e.g. brew install jq)\033[0m'
+  # Return successfully so we don't break the terminal statusline pipeline
+  exit 0
+fi
+
 input=$(cat)
 
 # --- Config: read theme name from ~/.claude/plan-statusline.conf if present ---

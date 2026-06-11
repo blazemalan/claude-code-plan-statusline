@@ -1,0 +1,3 @@
+## 2024-11-20 - Prevent raw stderr leakage in CLI plugins
+**Learning:** When a CLI plugin (like a shell statusline) encounters a missing dependency (e.g., `jq`), failing to catch the error allows raw `stderr` output (like `jq: command not found`) to leak into the terminal's prompt area, breaking the visual formatting and providing a poor user experience.
+**Action:** Always verify dependencies up-front using `command -v <dep>` and, if missing, gracefully exit (status 0 so as not to break the parent pipeline) while printing a cleanly formatted, actionable error message (e.g., in red text with installation instructions).

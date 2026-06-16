@@ -9,7 +9,19 @@
 #   theme=hearth    # warm amber, fixed-amber circles, silent until 70%
 #   theme=glow      # pink neon arcade, mint→magenta tier ramp
 #   theme=scrubs    # clinical teal vitals monitor
+#   theme=harbor    # calm ocean blues, silent low tiers, warm storm warning on top
+#   theme=atomic    # 1950s atomic-age: teal→mustard→orange→red ramp, starburst separators
+#   theme=slime     # toxic green ooze that drips; murky→vivid→acid as the goo grows
+#   theme=rainbow   # Mario Kart Rainbow Road: a flowing per-character rainbow gradient
+#   theme=dracula     # Dracula palette — neon purple/pink/cyan (truecolor)
+#   theme=nord        # Nord palette — arctic frost & aurora (truecolor)
+#   theme=gruvbox     # Gruvbox dark palette — warm retro earth tones (truecolor)
+#   theme=catppuccin  # Catppuccin Mocha palette — soft pastels (truecolor)
 # Missing or invalid theme → default.
+#
+# The 'rainbow' theme reads an optional 'rainbow_speed=N' line (default 1) = how
+# many hues the gradient drifts per repaint (~1×/sec; larger N travels more color
+# per second, not smoother — the line repaints at most once a second).
 #
 # Honors NO_COLOR (https://no-color.org): if NO_COLOR is set to any non-empty
 # value, all ANSI color/style is suppressed; the line is plain text (glyphs and
@@ -128,6 +140,14 @@ render_name() {
     printf '\033[2m%s\033[0m' "$text"
     return
   fi
+  if [[ -n "${RAINBOW:-}" ]]; then
+    # Per-character rainbow (model names are ASCII, so byte-indexing is safe).
+    local i
+    for (( i=0; i<${#text}; i++ )); do
+      rainbow_next; printf '\033[%sm%s\033[0m' "$_RAINBOW_SGR" "${text:i:1}"
+    done
+    return
+  fi
   if [[ -n "$NAME_SGR" ]]; then
     printf '\033[%sm%s\033[0m' "$NAME_SGR" "$text"
   else
@@ -194,18 +214,164 @@ theme_scrubs() {             # clinical teal vitals monitor
   EGG_RESET_WORD='defib'
 }
 
+theme_harbor() {             # calm ocean blues; silent low, storm only when usage climbs
+  TIER_CALM=''; TIER_WARN=''; TIER_HOT='38;5;215'; TIER_URGENT='1;38;5;196'
+  NAME_SGR='1;38;5;39'                          # bold harbor blue
+  SEP=' · '; SEP_COLOR='38;5;24'               # dim deep-slate blue
+  META='2;3;38;5;67'                            # dim italic steel-blue
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='38;5;38'; LABEL_SGR=''            # fixed sea-blue circle, plain label
+  EGG_GLYPH='≈'; EGG_GLYPH_COLOR='1;38;5;196'
+  EGG_MSG_A='storm warning'; EGG_COLOR_A='1;38;5;196'
+  EGG_MSG_B='storm warning'; EGG_COLOR_B='1;38;5;196'   # equal -> steady, no flash (stays calm)
+  EGG_RESET_WORD='fair winds'
+}
+
+theme_atomic() {             # 1950s atomic-age: retro teal -> mustard -> orange -> red, starbursts
+  TIER_CALM='38;5;43'; TIER_WARN='38;5;178'; TIER_HOT='1;38;5;208'; TIER_URGENT='1;38;5;196'
+  NAME_SGR='1;38;5;208'                          # bold atomic orange
+  SEP=' ✦ '; SEP_COLOR='38;5;143'               # muted-mustard starburst accents
+  META='2;3;38;5;73'                            # dim italic cadet (cool retro contrast)
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'         # circle + label track the tier ramp
+  EGG_GLYPH='✷'; EGG_GLYPH_COLOR='1;38;5;208'
+  EGG_MSG_A='KABOOM!';  EGG_COLOR_A='1;38;5;196'
+  EGG_MSG_B='KA-BLAM!'; EGG_COLOR_B='1;38;5;208'   # flashes (retro comic explosion)
+  EGG_RESET_WORD='rebuild'
+}
+
+theme_slime() {              # toxic green ooze; murky -> vivid -> acid as the goo grows
+  TIER_CALM='38;5;71'; TIER_WARN='38;5;76'; TIER_HOT='1;38;5;118'; TIER_URGENT='1;38;5;154'
+  NAME_SGR='1;38;5;118'                          # bold glowing slime green
+  SEP=' · '; SEP_COLOR='38;5;65'                # dim murky-green specks (fallback)
+  SEP_ANIM='˙|·|.| '                            # drip: bead falls high→mid→low→off, 1 frame/sec
+  META='2;3;38;5;65'                            # dim italic swamp green
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'         # blobs grow AND turn toxic with the ramp
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='SLIMED!'; EGG_COLOR_A='1;38;5;118'
+  EGG_MSG_B='GLOOP!';  EGG_COLOR_B='1;38;5;154'   # flashes (gooey splat)
+  EGG_RESET_WORD='drains'
+}
+
+theme_rainbow() {            # Mario Kart Rainbow Road: a flowing per-character rainbow gradient
+  RAINBOW=1                                    # paint()/render_name() switch to the hue cursor
+  TIER_CALM=''; TIER_WARN=''; TIER_HOT=''; TIER_URGENT=''   # unused — rainbow overrides all color
+  NAME_SGR=''                                  # unused — the name is per-letter rainbow
+  SEP=' · '; SEP_COLOR=''                       # color unused; the dot rides the rainbow
+  META='1'                                     # non-empty only so the 100% egg's reset clause also rainbows
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'         # span colors unused under rainbow
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='OFF THE EDGE!'; EGG_COLOR_A='1;38;5;196'
+  EGG_MSG_B='LAKITU!';       EGG_COLOR_B='1;38;5;51'   # text alternates; rainbow colors it
+  EGG_RESET_WORD='Lakitu'
+}
+
+# --- Palettes ported from Oh My Posh themes (truecolor 38;2;R;G;B = exact hex). ---
+
+theme_dracula() {            # Dracula (draculatheme.com) — neon purple/pink/cyan
+  TIER_CALM='38;2;80;250;123'; TIER_WARN='38;2;139;233;253'; TIER_HOT='1;38;2;255;121;198'; TIER_URGENT='1;38;2;255;85;85'
+  NAME_SGR='1;38;2;189;147;249'                 # bold purple
+  SEP=' · '; SEP_COLOR='38;2;98;114;164'        # comment blue-grey
+  META='3;38;2;98;114;164'                      # italic comment
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='DRAINED!'; EGG_COLOR_A='1;38;2;255;85;85'
+  EGG_MSG_B='BLED DRY'; EGG_COLOR_B='1;38;2;189;147;249'   # flashes red <-> purple
+  EGG_RESET_WORD='sunrise'
+}
+
+theme_nord() {               # Nord (nordtheme.com) — arctic frost & aurora
+  TIER_CALM='38;2;163;190;140'; TIER_WARN='38;2;129;161;193'; TIER_HOT='38;2;235;203;139'; TIER_URGENT='1;38;2;191;97;106'
+  NAME_SGR='1;38;2;136;192;208'                 # bold frost
+  SEP=' · '; SEP_COLOR='38;2;76;86;106'         # polar night nord3
+  META='3;38;2;76;86;106'
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='FROZEN SOLID'; EGG_COLOR_A='1;38;2;191;97;106'
+  EGG_MSG_B='WHITEOUT';     EGG_COLOR_B='1;38;2;236;239;244'   # flashes red <-> snow
+  EGG_RESET_WORD='thaws'
+}
+
+theme_gruvbox() {            # Gruvbox dark — warm retro earth tones
+  TIER_CALM='38;2;184;187;38'; TIER_WARN='38;2;142;192;124'; TIER_HOT='1;38;2;254;128;25'; TIER_URGENT='1;38;2;251;73;52'
+  NAME_SGR='1;38;2;250;189;47'                  # bold yellow
+  SEP=' · '; SEP_COLOR='38;2;146;131;116'       # gray
+  META='3;38;2;146;131;116'
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='SCORCHED'; EGG_COLOR_A='1;38;2;251;73;52'
+  EGG_MSG_B='BURNT TOAST'; EGG_COLOR_B='1;38;2;254;128;25'   # flashes red <-> orange
+  EGG_RESET_WORD='regrows'
+}
+
+theme_catppuccin() {         # Catppuccin Mocha — soft pastels
+  TIER_CALM='38;2;166;227;161'; TIER_WARN='38;2;148;226;213'; TIER_HOT='1;38;2;250;179;135'; TIER_URGENT='1;38;2;243;139;168'
+  NAME_SGR='1;38;2;203;166;247'                 # bold mauve
+  SEP=' · '; SEP_COLOR='38;2;108;112;134'       # overlay0
+  META='3;38;2;108;112;134'
+  SEG_CIRCLE=1; LABEL_SEP=''
+  CIRCLE_SGR='@tier'; LABEL_SGR='@tier'
+  EGG_GLYPH=''; EGG_GLYPH_COLOR=''
+  EGG_MSG_A='OVERBREWED'; EGG_COLOR_A='1;38;2;243;139;168'
+  EGG_MSG_B='HISS!';      EGG_COLOR_B='1;38;2;203;166;247'   # flashes red <-> mauve
+  EGG_RESET_WORD='refills'
+}
+
 # ============================================================================
 # Shared renderer
 # ============================================================================
 
-# Wrap TEXT in an SGR if non-empty (self-terminating); else print plain.
+# Rainbow Road: a global hue cursor (_HUE) advances once per painted unit so the
+# colors sweep along the line; RAINBOW_PHASE (now_epoch × speed, set in render_line)
+# offsets the wheel each repaint so the rainbow flows. Only the 'rainbow' theme sets
+# RAINBOW=1; every other theme leaves these inert.
+RAINBOW_PALETTE=(196 202 208 214 220 226 190 154 118 82 46 47 48 49 50 51 45 39 33 27 21 57 93 129 165 201 200 199 198 197)
+_HUE=0; RAINBOW_PHASE=0; _RAINBOW_SGR=''; RAINBOW_SPEED=1   # hues advanced per repaint; override via rainbow_speed= in the conf
+# Set _RAINBOW_SGR to the cursor's current hue, then advance it. NOT called via
+# $(...) — command substitution forks a subshell and would lose the _HUE bump.
+rainbow_next() {
+  local n=${#RAINBOW_PALETTE[@]}
+  _RAINBOW_SGR="1;38;5;${RAINBOW_PALETTE[$(( (_HUE + RAINBOW_PHASE) % n ))]}"
+  _HUE=$(( _HUE + 1 ))
+}
+
+# Wrap TEXT in an SGR if non-empty (self-terminating); else print plain. Under the
+# rainbow theme (and not NO_COLOR) the passed SGR is ignored and each pure-ASCII span
+# is colored character-by-character (a smooth gradient); a span with a multibyte glyph
+# (· → ↑ ◑) takes one hue so bash 3.2 never byte-splits it.
 paint() {
   local sgr=$1 text=$2
+  if [[ -n "${RAINBOW:-}" && -z "${NO_COLOR:-}" ]]; then
+    local LC_ALL=C _i
+    if [[ -z "${text//[$'\x20'-$'\x7e']/}" ]]; then
+      for (( _i=0; _i<${#text}; _i++ )); do rainbow_next; printf '\033[%sm%s\033[0m' "$_RAINBOW_SGR" "${text:_i:1}"; done
+    else
+      rainbow_next; printf '\033[%sm%s\033[0m' "$_RAINBOW_SGR" "$text"
+    fi
+    return
+  fi
   if [[ -n "$sgr" && -z "${NO_COLOR:-}" ]]; then printf '\033[%sm%s\033[0m' "$sgr" "$text"
   else printf '%s' "$text"; fi
 }
 
-paint_sep() { paint "$SEP_COLOR" "$SEP"; }
+# Separator. A theme may set SEP_ANIM to a '|'-joined frame list; the separator then
+# advances one frame per repaint (~1×/sec) so it animates — slime uses this to drip.
+# Each frame is wrapped in spaces so the line width never jitters (a blank frame = the
+# drip has fallen off). No SEP_ANIM = the static SEP, exactly as before.
+paint_sep() {
+  if [[ -n "${SEP_ANIM:-}" ]]; then
+    local -a frames; IFS='|' read -ra frames <<< "$SEP_ANIM"
+    local now; now=$(now_epoch)
+    paint "$SEP_COLOR" " ${frames[$(( now % ${#frames[@]} ))]} "
+  else
+    paint "$SEP_COLOR" "$SEP"
+  fi
+}
 
 # SGR for a percentage by shared tier thresholds (may be empty = default fg).
 tier_color() {
@@ -307,6 +473,10 @@ render_line() {
         lines_added=${lines_added:-} lines_removed=${lines_removed:-} \
         in_tokens=${in_tokens:-} out_tokens=${out_tokens:-}
 
+  # Rainbow Road: restart the hue sweep each render and reseed its phase from the
+  # clock (× speed), so the rainbow advances RAINBOW_SPEED hues per repaint.
+  [[ -n "${RAINBOW:-}" ]] && { _HUE=0; RAINBOW_PHASE=$(( $(now_epoch) * RAINBOW_SPEED )); }
+
   # Nothing to show yet (fresh session, before the first API response).
   if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" && -z "$cost_usd" ]]; then
     render_name "$model"; paint_sep
@@ -357,6 +527,7 @@ main() {
       value=${value%\"}; value=${value#\"}
       case "$key" in
         theme) [[ -n "$value" ]] && theme="$value" ;;
+        rainbow_speed) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1 )) && RAINBOW_SPEED="$value" ;;
       esac
     done < "$config_file"
   fi
@@ -398,6 +569,14 @@ main() {
     hearth) theme_hearth ;;
     glow)   theme_glow ;;
     scrubs) theme_scrubs ;;
+    harbor) theme_harbor ;;
+    atomic) theme_atomic ;;
+    slime)  theme_slime ;;
+    rainbow) theme_rainbow ;;
+    dracula) theme_dracula ;;
+    nord)    theme_nord ;;
+    gruvbox) theme_gruvbox ;;
+    catppuccin) theme_catppuccin ;;
     default|*) theme_default ;;
   esac
   render_line

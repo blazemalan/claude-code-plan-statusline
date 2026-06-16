@@ -13,7 +13,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 FIXTURES_DIR="$(dirname "$0")/fixtures"
-THEMES=("default" "hearth" "glow" "scrubs" "no-config")
+THEMES=("default" "hearth" "glow" "scrubs" "harbor" "atomic" "slime" "rainbow" "dracula" "nord" "gruvbox" "catppuccin" "no-config")
 EPOCHS=("1000000000" "1000000001")
 NO_COLORS=("" "1")   # exercise both colored and NO_COLOR output
 TIMEZONES=("UTC" "America/Phoenix")

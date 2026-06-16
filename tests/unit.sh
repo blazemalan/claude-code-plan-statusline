@@ -57,13 +57,18 @@ theme_default
 [[ "$SEG_CIRCLE" == "0" ]] && ok "theme_default: SEG_CIRCLE" || bad "theme_default: SEG_CIRCLE"
 [[ -n "$NAME_SGR" ]] && ok "theme_default: NAME_SGR set" || bad "theme_default: NAME_SGR"
 
-for t in hearth glow scrubs; do
+for t in hearth glow scrubs harbor atomic slime dracula nord gruvbox catppuccin; do
   "theme_$t"
   [[ -n "$NAME_SGR" ]] && ok "theme_$t: NAME_SGR set" || bad "theme_$t: NAME_SGR"
   [[ "$LABEL_SEP" == "" ]]      && ok "theme_$t: LABEL_SEP empty" || bad "theme_$t: LABEL_SEP ('$LABEL_SEP')"
   [[ "$SEG_CIRCLE" == "1" ]]    && ok "theme_$t: SEG_CIRCLE" || bad "theme_$t: SEG_CIRCLE"
   [[ -n "$EGG_RESET_WORD" ]]    && ok "theme_$t: egg word" || bad "theme_$t: egg word"
 done
+
+# rainbow drives color per-character (NAME_SGR intentionally empty); assert its flag.
+theme_rainbow
+[[ "${RAINBOW:-}" == "1" ]] && ok "rainbow: RAINBOW flag set" || bad "rainbow: RAINBOW flag"
+[[ "$EGG_RESET_WORD" == "Lakitu" ]] && ok "rainbow: egg word" || bad "rainbow: egg word ('$EGG_RESET_WORD')"
 
 theme_hearth
 [[ "$CIRCLE_SGR" == "38;5;214" ]] && ok "hearth: CIRCLE_SGR amber" || bad "hearth: CIRCLE_SGR ('$CIRCLE_SGR')"

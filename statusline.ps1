@@ -4,6 +4,18 @@ $ESC = [char]27
 # Honors NO_COLOR (https://no-color.org): any non-empty value suppresses all ANSI.
 $script:NoColor = -not [string]::IsNullOrEmpty($env:NO_COLOR)
 
+# Rainbow Road: a global hue cursor (HUE) advances once per painted unit so the
+# colors sweep along the line; RAINBOW_PHASE (now_epoch * speed, set in render_line)
+# offsets the wheel each repaint so the rainbow flows. Only the 'rainbow' theme sets
+# RAINBOW; every other theme leaves these inert.
+$script:RAINBOW_PALETTE = @(196,202,208,214,220,226,190,154,118,82,46,47,48,49,50,51,45,39,33,27,21,57,93,129,165,201,200,199,198,197)
+$script:HUE = 0
+$script:RAINBOW_PHASE = 0
+$script:RAINBOW_SPEED = 1
+$script:_RAINBOW_SGR = ''
+$script:RAINBOW = ''
+$script:SEP_ANIM = '' 
+
 function date_fmt($epoch, $fmt) {
     # Not used directly in PS, handled locally
 }
@@ -113,6 +125,14 @@ function render_name($text) {
     if (limit_pegged) {
         return "${ESC}[2m${text}${ESC}[0m"
     }
+    if (-not [string]::IsNullOrEmpty($script:RAINBOW)) {
+        $res = ''
+        foreach ($ch in $text.ToCharArray()) {
+            rainbow_next
+            $res += "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
+        }
+        return $res
+    }
     if (-not [string]::IsNullOrEmpty($script:NAME_SGR)) {
         return "${ESC}[$($script:NAME_SGR)m${text}${ESC}[0m"
     }
@@ -171,7 +191,135 @@ function Theme-Scrubs() {
     $script:EGG_RESET_WORD = 'defib'
 }
 
+function Theme-Harbor() {
+    $script:TIER_CALM = ''; $script:TIER_WARN = ''; $script:TIER_HOT = '38;5;215'; $script:TIER_URGENT = '1;38;5;196'
+    $script:NAME_SGR = '1;38;5;39'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;5;24'
+    $script:META = '2;3;38;5;67'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '38;5;38'; $script:LABEL_SGR = ''
+    $script:EGG_GLYPH = '≈'; $script:EGG_GLYPH_COLOR = '1;38;5;196'
+    $script:EGG_MSG_A = 'storm warning'; $script:EGG_COLOR_A = '1;38;5;196'
+    $script:EGG_MSG_B = 'storm warning'; $script:EGG_COLOR_B = '1;38;5;196'
+    $script:EGG_RESET_WORD = 'fair winds'
+}
+
+function Theme-Atomic() {
+    $script:TIER_CALM = '38;5;43'; $script:TIER_WARN = '38;5;178'; $script:TIER_HOT = '1;38;5;208'; $script:TIER_URGENT = '1;38;5;196'
+    $script:NAME_SGR = '1;38;5;208'
+    $script:SEP = ' ✦ '; $script:SEP_COLOR = '38;5;143'
+    $script:META = '2;3;38;5;73'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = '✷'; $script:EGG_GLYPH_COLOR = '1;38;5;208'
+    $script:EGG_MSG_A = 'KABOOM!'; $script:EGG_COLOR_A = '1;38;5;196'
+    $script:EGG_MSG_B = 'KA-BLAM!'; $script:EGG_COLOR_B = '1;38;5;208'
+    $script:EGG_RESET_WORD = 'rebuild'
+}
+
+function Theme-Slime() {
+    $script:TIER_CALM = '38;5;71'; $script:TIER_WARN = '38;5;76'; $script:TIER_HOT = '1;38;5;118'; $script:TIER_URGENT = '1;38;5;154'
+    $script:NAME_SGR = '1;38;5;118'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;5;65'
+    $script:SEP_ANIM = '˙|·|.| '
+    $script:META = '2;3;38;5;65'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'SLIMED!'; $script:EGG_COLOR_A = '1;38;5;118'
+    $script:EGG_MSG_B = 'GLOOP!'; $script:EGG_COLOR_B = '1;38;5;154'
+    $script:EGG_RESET_WORD = 'drains'
+}
+
+function Theme-Rainbow() {
+    $script:RAINBOW = '1'
+    $script:TIER_CALM = ''; $script:TIER_WARN = ''; $script:TIER_HOT = ''; $script:TIER_URGENT = ''
+    $script:NAME_SGR = ''
+    $script:SEP = ' · '; $script:SEP_COLOR = ''
+    $script:META = '1'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'OFF THE EDGE!'; $script:EGG_COLOR_A = '1;38;5;196'
+    $script:EGG_MSG_B = 'LAKITU!'; $script:EGG_COLOR_B = '1;38;5;51'
+    $script:EGG_RESET_WORD = 'Lakitu'
+}
+
+# --- Palettes ported from Oh My Posh themes (truecolor 38;2;R;G;B = exact hex). ---
+
+function Theme-Dracula() {
+    $script:TIER_CALM = '38;2;80;250;123'; $script:TIER_WARN = '38;2;139;233;253'; $script:TIER_HOT = '1;38;2;255;121;198'; $script:TIER_URGENT = '1;38;2;255;85;85'
+    $script:NAME_SGR = '1;38;2;189;147;249'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;2;98;114;164'
+    $script:META = '3;38;2;98;114;164'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'DRAINED!'; $script:EGG_COLOR_A = '1;38;2;255;85;85'
+    $script:EGG_MSG_B = 'BLED DRY'; $script:EGG_COLOR_B = '1;38;2;189;147;249'
+    $script:EGG_RESET_WORD = 'sunrise'
+}
+
+function Theme-Nord() {
+    $script:TIER_CALM = '38;2;163;190;140'; $script:TIER_WARN = '38;2;129;161;193'; $script:TIER_HOT = '38;2;235;203;139'; $script:TIER_URGENT = '1;38;2;191;97;106'
+    $script:NAME_SGR = '1;38;2;136;192;208'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;2;76;86;106'
+    $script:META = '3;38;2;76;86;106'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'FROZEN SOLID'; $script:EGG_COLOR_A = '1;38;2;191;97;106'
+    $script:EGG_MSG_B = 'WHITEOUT'; $script:EGG_COLOR_B = '1;38;2;236;239;244'
+    $script:EGG_RESET_WORD = 'thaws'
+}
+
+function Theme-Gruvbox() {
+    $script:TIER_CALM = '38;2;184;187;38'; $script:TIER_WARN = '38;2;142;192;124'; $script:TIER_HOT = '1;38;2;254;128;25'; $script:TIER_URGENT = '1;38;2;251;73;52'
+    $script:NAME_SGR = '1;38;2;250;189;47'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;2;146;131;116'
+    $script:META = '3;38;2;146;131;116'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'SCORCHED'; $script:EGG_COLOR_A = '1;38;2;251;73;52'
+    $script:EGG_MSG_B = 'BURNT TOAST'; $script:EGG_COLOR_B = '1;38;2;254;128;25'
+    $script:EGG_RESET_WORD = 'regrows'
+}
+
+function Theme-Catppuccin() {
+    $script:TIER_CALM = '38;2;166;227;161'; $script:TIER_WARN = '38;2;148;226;213'; $script:TIER_HOT = '1;38;2;250;179;135'; $script:TIER_URGENT = '1;38;2;243;139;168'
+    $script:NAME_SGR = '1;38;2;203;166;247'
+    $script:SEP = ' · '; $script:SEP_COLOR = '38;2;108;112;134'
+    $script:META = '3;38;2;108;112;134'
+    $script:SEG_CIRCLE = 1; $script:LABEL_SEP = ''
+    $script:CIRCLE_SGR = '@tier'; $script:LABEL_SGR = '@tier'
+    $script:EGG_GLYPH = ''; $script:EGG_GLYPH_COLOR = ''
+    $script:EGG_MSG_A = 'OVERBREWED'; $script:EGG_COLOR_A = '1;38;2;243;139;168'
+    $script:EGG_MSG_B = 'HISS!'; $script:EGG_COLOR_B = '1;38;2;203;166;247'
+    $script:EGG_RESET_WORD = 'refills'
+}
+
+function rainbow_next() {
+    $n = $script:RAINBOW_PALETTE.Count
+    $idx = (($script:HUE + $script:RAINBOW_PHASE) % $n)
+    $script:_RAINBOW_SGR = "1;38;5;$($script:RAINBOW_PALETTE[$idx])"
+    $script:HUE = $script:HUE + 1
+}
+
 function paint($sgr, $text) {
+    if ((-not [string]::IsNullOrEmpty($script:RAINBOW)) -and (-not $script:NoColor)) {
+        if ($text -match '^[\x20-\x7e]*$') {
+            $res = ''
+            foreach ($ch in $text.ToCharArray()) {
+                rainbow_next
+                $res += "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
+            }
+            return $res
+        } else {
+            rainbow_next
+            return "${ESC}[$($script:_RAINBOW_SGR)m${text}${ESC}[0m"
+        }
+    }
     if ((-not [string]::IsNullOrEmpty($sgr)) -and (-not $script:NoColor)) {
         return "${ESC}[${sgr}m${text}${ESC}[0m"
     }
@@ -179,6 +327,12 @@ function paint($sgr, $text) {
 }
 
 function paint_sep() {
+    if (-not [string]::IsNullOrEmpty($script:SEP_ANIM)) {
+        $frames = $script:SEP_ANIM -split '\|'
+        $now = now_epoch
+        $idx = $now % $frames.Count
+        return paint $script:SEP_COLOR " $($frames[$idx]) "
+    }
     return paint $script:SEP_COLOR $script:SEP
 }
 
@@ -290,6 +444,10 @@ function egg($label, $reset_str) {
 }
 
 function render_line() {
+    if (-not [string]::IsNullOrEmpty($script:RAINBOW)) {
+        $script:HUE = 0
+        $script:RAINBOW_PHASE = (now_epoch) * $script:RAINBOW_SPEED
+    }
     if ([string]::IsNullOrEmpty($script:ctx_pct) -and [string]::IsNullOrEmpty($script:five_pct) -and [string]::IsNullOrEmpty($script:week_pct) -and [string]::IsNullOrEmpty($script:cost_usd)) {
         $res = render_name $script:model
         $res += paint_sep
@@ -419,6 +577,10 @@ function Main() {
                         if ($key -eq 'theme' -and -not [string]::IsNullOrEmpty($value)) {
                             $theme = $value
                         }
+                        if ($key -eq 'rainbow_speed' -and $value -match '^[0-9]+$') {
+                            $sp = 0
+                            if ([int]::TryParse($value, [ref]$sp) -and $sp -ge 1) { $script:RAINBOW_SPEED = $sp }
+                        }
                     }
                 }
             }
@@ -429,6 +591,14 @@ function Main() {
         'hearth' { Theme-Hearth }
         'glow' { Theme-Glow }
         'scrubs' { Theme-Scrubs }
+        'harbor' { Theme-Harbor }
+        'atomic' { Theme-Atomic }
+        'slime' { Theme-Slime }
+        'rainbow' { Theme-Rainbow }
+        'dracula' { Theme-Dracula }
+        'nord' { Theme-Nord }
+        'gruvbox' { Theme-Gruvbox }
+        'catppuccin' { Theme-Catppuccin }
         default { Theme-Default }
     }
 

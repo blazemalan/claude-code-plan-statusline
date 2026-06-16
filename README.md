@@ -4,7 +4,7 @@
 
 A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keeps your **actual plan rate-limit usage** at the bottom of the terminal — the same numbers `/usage` reports, without typing `/usage`. No network calls, no auth, no dollar-cost guesswork.
 
-![statusline demo — cycling through the four themes](demo.svg)
+![statusline demo — cycling through the themes](demo.svg)
 
 <sub>Animated demo (themes cycle automatically). Static screenshot:</sub>
 
@@ -13,7 +13,7 @@ A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keep
 - **Real plan usage, not dollar cost** — your 5-hour and weekly rate-limit windows and when they reset, read straight from Claude Code's own data.
 - **Pro, Max, and Enterprise** — auto-detects your plan: rate-limit windows on Pro/Max, a session dashboard (cost · duration · tokens) on managed/Enterprise plans that have no windows.
 - **Per-chat context gauge** — how full the current conversation's context window is, at a glance.
-- **Four built-in themes** — switch instantly with no restart, or ask Claude Code to invent a new one.
+- **Twelve built-in themes** — including animated ones (slime drips; rainbow flows) and four ported from Oh My Posh palettes (Dracula, Nord, Gruvbox, Catppuccin) — switch instantly with no restart, or ask Claude Code to invent a new one.
 - **No network, no auth** — reads only the JSON Claude Code already pipes in; never touches your credentials.
 - **Portable** — macOS, Linux, WSL, and native Windows. The bash version needs only `jq`; the PowerShell version (`statusline.ps1`) needs **zero installs** (PowerShell 5.1+ built-ins). The two render byte-identical output — a cross-check test diffs them on every fixture.
 
@@ -110,7 +110,7 @@ Notes:
 
 ## Themes
 
-Four themes ship in the box. Select one by creating `~/.claude/plan-statusline.conf` (`%USERPROFILE%\.claude\plan-statusline.conf` on Windows — both scripts read the same file):
+Twelve themes ship in the box (four of them ported from [Oh My Posh](https://ohmyposh.dev/docs/themes) palettes). Select one by creating `~/.claude/plan-statusline.conf` (`%USERPROFILE%\.claude\plan-statusline.conf` on Windows — both scripts read the same file):
 
 ```
 theme=hearth
@@ -128,6 +128,14 @@ The statusline honors [`NO_COLOR`](https://no-color.org): set the `NO_COLOR` env
 | `hearth`  | Warm amber, restrained. Bold-amber name; tier color stays silent until 70% (orange) / 90% (red); dim italic reset times. |
 | `glow`    | Pink neon arcade. Bold-magenta name; mint→pink→magenta→red tier ramp; italic rose reset times.                      |
 | `scrubs`  | Clinical teal vitals monitor. Bold bright-teal name; teal→bright→amber→red ramp; soft light-teal reset times.       |
+| `harbor`  | Calm ocean blues. Bold sea-blue name + fixed-blue context circles; tiers stay silent until 70% (amber) / 90% (red) — a warm `storm warning` surfaces only when usage climbs. |
+| `atomic`  | 1950s atomic-age. Bold orange name, muted-mustard `✦` starburst separators; retro teal→mustard→orange→red ramp.     |
+| `slime`   | Toxic green ooze. Bold slime-green name; murky→vivid→acid-green ramp; the separators **drip** — a droplet falls once per second (`˙ · .` then gone). |
+| `rainbow` | Mario Kart Rainbow Road. A flowing **per-character rainbow** gradient across the whole line; drifts one hue per refresh (tune the pace with a `rainbow_speed=N` line in the config). |
+| `dracula` | [Dracula](https://draculatheme.com) palette (truecolor). Bold-purple name; green→cyan→pink→red ramp; comment-grey separators. |
+| `nord` | [Nord](https://www.nordtheme.com) palette (truecolor). Bold-frost name; green→blue→yellow→red aurora ramp; polar-night separators. |
+| `gruvbox` | Gruvbox dark palette (truecolor). Bold-yellow name; green→aqua→orange→red retro ramp; warm-grey separators. |
+| `catppuccin` | Catppuccin Mocha palette (truecolor). Bold-mauve name; green→teal→peach→red pastel ramp; muted-overlay separators. |
 
 The model name renders in each theme's solid color (at 100% plan usage it dims, part of the per-theme easter egg). If the config file is missing or names an unknown theme, the statusline falls back to `default`.
 

@@ -59,7 +59,10 @@ five_pct='105.5' week_pct=''
 limit_pegged && ok "limit_pegged: fractional above" || bad "limit_pegged: fractional above"
 five_pct='99.9' week_pct=''
 limit_pegged && bad "limit_pegged: fractional below" || ok "limit_pegged: fractional below"
-five_pct='' week_pct=''
+# shellcheck disable=SC2034  # reset for later checks
+five_pct=''
+# shellcheck disable=SC2034  # reset for later checks
+week_pct=''
 
 # Pegged: name dims (static), still preserves text exactly.
 five_pct=100; NAME_SGR='1;38;5;214'

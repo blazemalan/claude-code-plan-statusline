@@ -76,6 +76,19 @@ theme_hearth
 theme_default
 [[ "$CIRCLE_SGR" == "@tier" ]] && ok "default: CIRCLE_SGR @tier" || bad "default: CIRCLE_SGR ('$CIRCLE_SGR')"
 
+# ── fmt_duration ─────────────────────────────────────────────────────────────
+[[ -z "$(fmt_duration '')" ]] && ok "fmt_duration: empty" || bad "fmt_duration: empty"
+[[ "$(fmt_duration 0)" == "0s" ]] && ok "fmt_duration: 0ms -> 0s" || bad "fmt_duration: 0ms -> 0s"
+[[ "$(fmt_duration 999)" == "0s" ]] && ok "fmt_duration: 999ms -> 0s" || bad "fmt_duration: 999ms -> 0s"
+[[ "$(fmt_duration 1000)" == "1s" ]] && ok "fmt_duration: 1000ms -> 1s" || bad "fmt_duration: 1000ms -> 1s"
+[[ "$(fmt_duration 59999)" == "59s" ]] && ok "fmt_duration: 59999ms -> 59s" || bad "fmt_duration: 59999ms -> 59s"
+[[ "$(fmt_duration 60000)" == "1m0s" ]] && ok "fmt_duration: 60000ms -> 1m0s" || bad "fmt_duration: 60000ms -> 1m0s"
+[[ "$(fmt_duration 65000)" == "1m5s" ]] && ok "fmt_duration: 65000ms -> 1m5s" || bad "fmt_duration: 65000ms -> 1m5s"
+[[ "$(fmt_duration 3599999)" == "59m59s" ]] && ok "fmt_duration: 3599999ms -> 59m59s" || bad "fmt_duration: 3599999ms -> 59m59s"
+[[ "$(fmt_duration 3600000)" == "1h0m" ]] && ok "fmt_duration: 3600000ms -> 1h0m" || bad "fmt_duration: 3600000ms -> 1h0m"
+[[ "$(fmt_duration 3660000)" == "1h1m" ]] && ok "fmt_duration: 3660000ms -> 1h1m" || bad "fmt_duration: 3660000ms -> 1h1m"
+[[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
+
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi
 echo "All unit tests passed."

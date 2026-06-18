@@ -44,6 +44,23 @@ NAME_SGR='1;38;5;214'
 NAME_SGR=''
 [[ "$(render_name 'Opus 4.8')" == "Opus 4.8" ]] && ok "render_name: empty color plain" || bad "render_name: empty color"
 
+# ── limit_pegged ─────────────────────────────────────────────────────────────
+five_pct='' week_pct=''
+limit_pegged && bad "limit_pegged: empty" || ok "limit_pegged: empty"
+five_pct='99' week_pct='50'
+limit_pegged && bad "limit_pegged: below" || ok "limit_pegged: below"
+five_pct='100' week_pct=''
+limit_pegged && ok "limit_pegged: five_pct 100" || bad "limit_pegged: five_pct 100"
+five_pct='' week_pct='100'
+limit_pegged && ok "limit_pegged: week_pct 100" || bad "limit_pegged: week_pct 100"
+five_pct='100' week_pct='100'
+limit_pegged && ok "limit_pegged: both 100" || bad "limit_pegged: both 100"
+five_pct='105.5' week_pct=''
+limit_pegged && ok "limit_pegged: fractional above" || bad "limit_pegged: fractional above"
+five_pct='99.9' week_pct=''
+limit_pegged && bad "limit_pegged: fractional below" || ok "limit_pegged: fractional below"
+five_pct='' week_pct=''
+
 # Pegged: name dims (static), still preserves text exactly.
 five_pct=100; NAME_SGR='1;38;5;214'
 [[ "$(render_name 'Opus 4.8' | strip_ansi)" == "Opus 4.8" ]] && ok "render_name: pegged preserves text" || bad "render_name: pegged"

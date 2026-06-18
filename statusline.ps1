@@ -16,10 +16,6 @@ $script:_RAINBOW_SGR = ''
 $script:RAINBOW = ''
 $script:SEP_ANIM = '' 
 
-function date_fmt($epoch, $fmt) {
-    # Not used directly in PS, handled locally
-}
-
 function fmt_time($epoch) {
     if ([string]::IsNullOrEmpty($epoch)) { return '' }
     $n = 0

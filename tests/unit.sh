@@ -23,6 +23,12 @@ source ./statusline.sh </dev/null
 declare -F render_line >/dev/null && ok "source: functions defined" \
   || bad "source: functions defined"
 
+# fmt_size testing
+[[ "$(fmt_size "248")" == "248" ]] && ok "fmt_size: <1k -> plain" || bad "fmt_size: <1k -> plain (got '$(fmt_size "248")')"
+[[ "$(fmt_size "63015")" == "63k" ]] && ok "fmt_size: >=1k -> k" || bad "fmt_size: >=1k -> k (got '$(fmt_size "63015")')"
+[[ "$(fmt_size "1000000")" == "1M" ]] && ok "fmt_size: >=1M -> M" || bad "fmt_size: >=1M -> M (got '$(fmt_size "1000000")')"
+[[ -z "$(fmt_size "")" ]] && ok "fmt_size: empty -> empty" || bad "fmt_size: empty -> empty (got '$(fmt_size "")')"
+
 # render_name draws the model name as ONE solid span; ANSI-stripped output
 # equals the text exactly. Set rate vars so limit_pegged works under `set -u`.
 # shellcheck disable=SC2034  # consumed by the sourced limit_pegged()

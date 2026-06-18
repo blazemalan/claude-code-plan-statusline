@@ -66,6 +66,7 @@ fmt_time() {
 fmt_size() {
   local n=$1
   [[ -z "$n" ]] && return
+  [[ ! "$n" =~ ^[-+]?[0-9]+$ ]] && return
   if   ((n >= 1000000)); then printf '%dM' $((n / 1000000))
   elif ((n >= 1000));    then printf '%dk' $((n / 1000))
   else                        printf '%d' "$n"
@@ -88,6 +89,7 @@ fmt_cost() {
 fmt_duration() {
   local ms=$1
   [[ -z "$ms" ]] && return
+  [[ ! "$ms" =~ ^[-+]?[0-9]+$ ]] && return
   local s=$(( ms / 1000 ))
   if   (( s >= 3600 )); then printf '%dh%dm' $(( s / 3600 )) $(( (s % 3600) / 60 ))
   elif (( s >= 60 ));   then printf '%dm%ds' $(( s / 60 )) $(( s % 60 ))
@@ -109,6 +111,7 @@ fmt_when() {
 ctx_circle() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
+  [[ ! "$pct" =~ ^[-+]?[0-9]+$ ]] && return
   if   ((pct >= 88)); then printf '●'
   elif ((pct >= 63)); then printf '◕'
   elif ((pct >= 38)); then printf '◑'
@@ -120,8 +123,8 @@ ctx_circle() {
 # True when either rate limit is pegged at 100% — drives each theme's
 # 100% easter egg state (flatline, burnout, game over, skull).
 limit_pegged() {
-  { [[ -n "$five_pct" ]] && (( ${five_pct%.*} >= 100 )); } ||
-  { [[ -n "$week_pct" ]] && (( ${week_pct%.*} >= 100 )); }
+  { [[ -n "$five_pct" ]] && [[ "${five_pct%.*}" =~ ^[-+]?[0-9]+$ ]] && (( ${five_pct%.*} >= 100 )); } ||
+  { [[ -n "$week_pct" ]] && [[ "${week_pct%.*}" =~ ^[-+]?[0-9]+$ ]] && (( ${week_pct%.*} >= 100 )); }
 }
 
 # Render the model name in the theme's solid NAME_SGR (empty -> terminal default
@@ -377,6 +380,7 @@ paint_sep() {
 tier_color() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
+  [[ ! "$pct" =~ ^[-+]?[0-9]+$ ]] && return
   if   (( pct >= 90 )); then printf '%s' "$TIER_URGENT"
   elif (( pct >= 70 )); then printf '%s' "$TIER_HOT"
   elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
@@ -392,6 +396,7 @@ cost_tier_color() {
   local usd=$1
   [[ -z "$usd" ]] && return
   local dollars=${usd%.*}; dollars=${dollars:-0}
+  [[ ! "$dollars" =~ ^[-+]?[0-9]+$ ]] && return
   if   (( dollars >= 10 )); then printf '%s' "$TIER_URGENT"
   elif (( dollars >= 5 ));  then printf '%s' "$TIER_HOT"
   elif (( dollars >= 2 ));  then printf '%s' "$TIER_WARN"
@@ -413,6 +418,7 @@ span_sgr() { if [[ "$1" == '@tier' ]]; then printf '%s' "$2"; else printf '%s' "
 seg_rate() {
   local label=$1 pctraw=$2 reset_str=$3
   local pct=${pctraw%.*}
+  [[ ! "$pct" =~ ^[-+]?[0-9]+$ ]] && return
   if (( pct >= 100 )); then egg "$label" "$reset_str"; return; fi
   local tier; tier=$(tier_color "$pct")
   if (( SEG_CIRCLE )); then

@@ -126,12 +126,11 @@ function render_name($text) {
         return "${ESC}[2m${text}${ESC}[0m"
     }
     if (-not [string]::IsNullOrEmpty($script:RAINBOW)) {
-        $res = ''
-        foreach ($ch in $text.ToCharArray()) {
+        $res = foreach ($ch in $text.ToCharArray()) {
             rainbow_next
-            $res += "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
+            "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
         }
-        return $res
+        return $res -join ''
     }
     if (-not [string]::IsNullOrEmpty($script:NAME_SGR)) {
         return "${ESC}[$($script:NAME_SGR)m${text}${ESC}[0m"
@@ -309,12 +308,11 @@ function rainbow_next() {
 function paint($sgr, $text) {
     if ((-not [string]::IsNullOrEmpty($script:RAINBOW)) -and (-not $script:NoColor)) {
         if ($text -match '^[\x20-\x7e]*$') {
-            $res = ''
-            foreach ($ch in $text.ToCharArray()) {
+            $res = foreach ($ch in $text.ToCharArray()) {
                 rainbow_next
-                $res += "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
+                "${ESC}[$($script:_RAINBOW_SGR)m$ch${ESC}[0m"
             }
-            return $res
+            return $res -join ''
         } else {
             rainbow_next
             return "${ESC}[$($script:_RAINBOW_SGR)m${text}${ESC}[0m"

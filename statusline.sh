@@ -377,6 +377,7 @@ paint_sep() {
 tier_color() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
+  [[ ! "$pct" =~ ^-?[0-9]+$ ]] && return
   if   (( pct >= 90 )); then printf '%s' "$TIER_URGENT"
   elif (( pct >= 70 )); then printf '%s' "$TIER_HOT"
   elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
@@ -392,6 +393,7 @@ cost_tier_color() {
   local usd=$1
   [[ -z "$usd" ]] && return
   local dollars=${usd%.*}; dollars=${dollars:-0}
+  [[ ! "$dollars" =~ ^-?[0-9]+$ ]] && return
   if   (( dollars >= 10 )); then printf '%s' "$TIER_URGENT"
   elif (( dollars >= 5 ));  then printf '%s' "$TIER_HOT"
   elif (( dollars >= 2 ));  then printf '%s' "$TIER_WARN"

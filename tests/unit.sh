@@ -76,6 +76,17 @@ theme_hearth
 theme_default
 [[ "$CIRCLE_SGR" == "@tier" ]] && ok "default: CIRCLE_SGR @tier" || bad "default: CIRCLE_SGR ('$CIRCLE_SGR')"
 
+# ── security regressions ─────────────────────────────────────────────────────
+
+# Ensure math evaluation functions don't execute injected code
+rm -f /tmp/pwned_cost
+cost_tier_color "a[\$(touch /tmp/pwned_cost)]"
+[[ ! -f /tmp/pwned_cost ]] && ok "security: cost_tier_color no cmd injection" || bad "security: cost_tier_color cmd injection"
+
+rm -f /tmp/pwned_tier
+tier_color "a[\$(touch /tmp/pwned_tier)]"
+[[ ! -f /tmp/pwned_tier ]] && ok "security: tier_color no cmd injection" || bad "security: tier_color cmd injection"
+
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi
 echo "All unit tests passed."

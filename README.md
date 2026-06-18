@@ -110,7 +110,7 @@ Notes:
 
 ## Themes
 
-Twelve themes ship in the box (four of them ported from [Oh My Posh](https://ohmyposh.dev/docs/themes) palettes). Select one by creating `~/.claude/plan-statusline.conf` (`%USERPROFILE%\.claude\plan-statusline.conf` on Windows — both scripts read the same file):
+Twelve themes ship in the box (four of them ported from [Oh My Posh](https://ohmyposh.dev/docs/themes) palettes). Select one by creating `~/.claude/plan-statusline.conf` (`%USERPROFILE%\.claude\plan-statusline.conf` on Windows — both scripts read the same file; see `plan-statusline.conf.example` for a ready-to-copy template):
 
 ```
 theme=hearth

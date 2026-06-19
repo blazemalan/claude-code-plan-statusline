@@ -359,6 +359,14 @@ function cost_tier_color($usd) {
     return $script:TIER_CALM
 }
 
+# Cache hit-rate tier — INVERTED from the usage tiers: a HIGH cache rate is GOOD
+# (calm/green), low is bad (urgent/red). Reuses each theme's TIER_* palette.
+function cache_tier_color($pct) {
+    if ($pct -ge 80) { return $script:TIER_CALM }
+    if ($pct -ge 50) { return $script:TIER_WARN }
+    return $script:TIER_URGENT
+}
+
 function meta_sgr($tier) {
     if (-not [string]::IsNullOrEmpty($script:META)) { return $script:META }
     return $tier
@@ -400,6 +408,23 @@ function seg_ctx($pctraw, $size) {
     if (-not [string]::IsNullOrEmpty($size)) {
         $res += paint (meta_sgr $tier) $size
     }
+    return $res
+}
+
+# Cache-hit efficiency: of the cacheable input this turn, the share served from
+# cache (reads) vs freshly written. Rides META styling; shown only when cache
+# data is present and non-zero. Owns its separator so a zero/empty value yields
+# nothing (no dangling separator). U+26A1 (lightning) <pct>%.
+function seg_cache($cr, $cc) {
+    $crT = truncate_pct $cr
+    $ccT = truncate_pct $cc
+    $crN = 0; $ccN = 0
+    if (-not [long]::TryParse($crT, [ref]$crN)) { $crN = 0 }
+    if (-not [long]::TryParse($ccT, [ref]$ccN)) { $ccN = 0 }
+    if (($crN + $ccN) -le 0) { return '' }
+    $pct = [math]::Truncate(($crN * 100) / ($crN + $ccN))
+    $res = paint_sep
+    $res += paint (cache_tier_color $pct) "$([char]0x26A1)${pct}%"
     return $res
 }
 
@@ -494,6 +519,8 @@ function render_line() {
         $res += seg_ctx $script:ctx_pct $size
     }
 
+    $res += seg_cache $script:cache_read $script:cache_creation
+
     return $res
 }
 
@@ -513,6 +540,8 @@ function Main() {
     $script:lines_removed = ''
     $script:in_tokens = ''
     $script:out_tokens = ''
+    $script:cache_read = ''
+    $script:cache_creation = ''
 
     $parsed = $null
     try {
@@ -546,6 +575,10 @@ function Main() {
             if ($null -ne $parsed.context_window.context_window_size) { $script:ctx_size = $parsed.context_window.context_window_size.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
             if ($null -ne $parsed.context_window.total_input_tokens) { $script:in_tokens = $parsed.context_window.total_input_tokens.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
             if ($null -ne $parsed.context_window.total_output_tokens) { $script:out_tokens = $parsed.context_window.total_output_tokens.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+            if ($null -ne $parsed.context_window.current_usage) {
+                if ($null -ne $parsed.context_window.current_usage.cache_read_input_tokens) { $script:cache_read = $parsed.context_window.current_usage.cache_read_input_tokens.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+                if ($null -ne $parsed.context_window.current_usage.cache_creation_input_tokens) { $script:cache_creation = $parsed.context_window.current_usage.cache_creation_input_tokens.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+            }
         }
         if ($null -ne $parsed.cost) {
             if ($null -ne $parsed.cost.total_cost_usd) { $script:cost_usd = $parsed.cost.total_cost_usd.ToString([System.Globalization.CultureInfo]::InvariantCulture) }

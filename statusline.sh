@@ -49,6 +49,8 @@ date_fmt() {
   date -r "$epoch" "$fmt" 2>/dev/null || date -d "@$epoch" "$fmt" 2>/dev/null
 }
 
+is_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
+
 # "Now" as an epoch. PLAN_SL_NOW overrides for deterministic tests (the 100%
 # easter-egg flash and fmt_when's "is the reset today?" check both depend on
 # the current time; pinning it lets tests — and the bash<->PowerShell parity
@@ -66,9 +68,10 @@ fmt_time() {
 fmt_size() {
   local n=$1
   [[ -z "$n" ]] && return
-  if   ((n >= 1000000)); then printf '%dM' $((n / 1000000))
-  elif ((n >= 1000));    then printf '%dk' $((n / 1000))
-  else                        printf '%d' "$n"
+  local val="$n"; is_int "$val" || val=0
+  if   ((val >= 1000000)); then printf '%dM' $((val / 1000000))
+  elif ((val >= 1000));    then printf '%dk' $((val / 1000))
+  else                          printf '%d' "$val"
   fi
 }
 
@@ -88,7 +91,8 @@ fmt_cost() {
 fmt_duration() {
   local ms=$1
   [[ -z "$ms" ]] && return
-  local s=$(( ms / 1000 ))
+  local val="$ms"; is_int "$val" || val=0
+  local s=$(( val / 1000 ))
   if   (( s >= 3600 )); then printf '%dh%dm' $(( s / 3600 )) $(( (s % 3600) / 60 ))
   elif (( s >= 60 ));   then printf '%dm%ds' $(( s / 60 )) $(( s % 60 ))
   else                       printf '%ds' "$s"
@@ -109,10 +113,11 @@ fmt_when() {
 ctx_circle() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
-  if   ((pct >= 88)); then printf '●'
-  elif ((pct >= 63)); then printf '◕'
-  elif ((pct >= 38)); then printf '◑'
-  elif ((pct >= 13)); then printf '◔'
+  local val="$pct"; is_int "$val" || val=0
+  if   ((val >= 88)); then printf '●'
+  elif ((val >= 63)); then printf '◕'
+  elif ((val >= 38)); then printf '◑'
+  elif ((val >= 13)); then printf '◔'
   else                     printf '○'
   fi
 }
@@ -120,8 +125,10 @@ ctx_circle() {
 # True when either rate limit is pegged at 100% — drives each theme's
 # 100% easter egg state (flatline, burnout, game over, skull).
 limit_pegged() {
-  { [[ -n "$five_pct" ]] && (( ${five_pct%.*} >= 100 )); } ||
-  { [[ -n "$week_pct" ]] && (( ${week_pct%.*} >= 100 )); }
+  local f=0 w=0
+  [[ -n "$five_pct" ]] && f="${five_pct%.*}" && { is_int "$f" || f=0; }
+  [[ -n "$week_pct" ]] && w="${week_pct%.*}" && { is_int "$w" || w=0; }
+  (( f >= 100 || w >= 100 ))
 }
 
 # Render the model name in the theme's solid NAME_SGR (empty -> terminal default
@@ -377,9 +384,10 @@ paint_sep() {
 tier_color() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
-  if   (( pct >= 90 )); then printf '%s' "$TIER_URGENT"
-  elif (( pct >= 70 )); then printf '%s' "$TIER_HOT"
-  elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
+  local val="$pct"; is_int "$val" || val=0
+  if   (( val >= 90 )); then printf '%s' "$TIER_URGENT"
+  elif (( val >= 70 )); then printf '%s' "$TIER_HOT"
+  elif (( val >= 50 )); then printf '%s' "$TIER_WARN"
   else                       printf '%s' "$TIER_CALM"
   fi
 }
@@ -392,10 +400,11 @@ cost_tier_color() {
   local usd=$1
   [[ -z "$usd" ]] && return
   local dollars=${usd%.*}; dollars=${dollars:-0}
-  if   (( dollars >= 10 )); then printf '%s' "$TIER_URGENT"
-  elif (( dollars >= 5 ));  then printf '%s' "$TIER_HOT"
-  elif (( dollars >= 2 ));  then printf '%s' "$TIER_WARN"
-  else                           printf '%s' "$TIER_CALM"
+  local val="$dollars"; is_int "$val" || val=0
+  if   (( val >= 10 )); then printf '%s' "$TIER_URGENT"
+  elif (( val >= 5 ));  then printf '%s' "$TIER_HOT"
+  elif (( val >= 2 ));  then printf '%s' "$TIER_WARN"
+  else                       printf '%s' "$TIER_CALM"
   fi
 }
 
@@ -413,7 +422,8 @@ span_sgr() { if [[ "$1" == '@tier' ]]; then printf '%s' "$2"; else printf '%s' "
 seg_rate() {
   local label=$1 pctraw=$2 reset_str=$3
   local pct=${pctraw%.*}
-  if (( pct >= 100 )); then egg "$label" "$reset_str"; return; fi
+  local val="$pct"; is_int "$val" || val=0
+  if (( val >= 100 )); then egg "$label" "$reset_str"; return; fi
   local tier; tier=$(tier_color "$pct")
   if (( SEG_CIRCLE )); then
     paint "$(span_sgr "$CIRCLE_SGR" "$tier")" "$(ctx_circle "$pct")"; printf ' '

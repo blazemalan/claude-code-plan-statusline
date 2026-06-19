@@ -32,12 +32,10 @@ function fmt_time($epoch) {
 function fmt_size($n) {
     if ([string]::IsNullOrEmpty($n)) { return '' }
     $num = 0
-    if ([long]::TryParse($n, [ref]$num)) {
-        if ($num -ge 1000000) { return "$([math]::Truncate($num / 1000000))M" }
-        if ($num -ge 1000) { return "$([math]::Truncate($num / 1000))k" }
-        return "$num"
-    }
-    return ''
+    if (-not [long]::TryParse($n, [ref]$num)) { $num = 0 }
+    if ($num -ge 1000000) { return "$([math]::Truncate($num / 1000000))M" }
+    if ($num -ge 1000) { return "$([math]::Truncate($num / 1000))k" }
+    return "$num"
 }
 
 function fmt_cost($usd) {
@@ -52,13 +50,11 @@ function fmt_cost($usd) {
 function fmt_duration($ms) {
     if ([string]::IsNullOrEmpty($ms)) { return '' }
     $n = 0
-    if ([long]::TryParse($ms, [ref]$n)) {
-        $s = [math]::Truncate($n / 1000)
-        if ($s -ge 3600) { return "$([math]::Truncate($s / 3600))h$([math]::Truncate(($s % 3600) / 60))m" }
-        if ($s -ge 60) { return "$([math]::Truncate($s / 60))m$($s % 60)s" }
-        return "${s}s"
-    }
-    return ''
+    if (-not [long]::TryParse($ms, [ref]$n)) { $n = 0 }
+    $s = [math]::Truncate($n / 1000)
+    if ($s -ge 3600) { return "$([math]::Truncate($s / 3600))h$([math]::Truncate(($s % 3600) / 60))m" }
+    if ($s -ge 60) { return "$([math]::Truncate($s / 60))m$($s % 60)s" }
+    return "${s}s"
 }
 
 function now_epoch() {
@@ -104,17 +100,19 @@ function ctx_circle($pctraw) {
         if ($n -ge 13) { return '◔' }
         return '○'
     }
-    return ''
+    return '○'
 }
 
 function limit_pegged() {
     $five = truncate_pct $script:five_pct
     if (-not [string]::IsNullOrEmpty($five)) {
-        $n = 0; if ([long]::TryParse($five, [ref]$n) -and $n -ge 100) { return $true }
+        $n = 0; if (-not [long]::TryParse($five, [ref]$n)) { $n = 0 }
+        if ($n -ge 100) { return $true }
     }
     $week = truncate_pct $script:week_pct
     if (-not [string]::IsNullOrEmpty($week)) {
-        $n = 0; if ([long]::TryParse($week, [ref]$n) -and $n -ge 100) { return $true }
+        $n = 0; if (-not [long]::TryParse($week, [ref]$n)) { $n = 0 }
+        if ($n -ge 100) { return $true }
     }
     return $false
 }
@@ -344,7 +342,7 @@ function tier_color($pctraw) {
         if ($n -ge 50) { return $script:TIER_WARN }
         return $script:TIER_CALM
     }
-    return ''
+    return $script:TIER_CALM
 }
 
 function cost_tier_color($usd) {
@@ -358,7 +356,7 @@ function cost_tier_color($usd) {
         if ($n -ge 2) { return $script:TIER_WARN }
         return $script:TIER_CALM
     }
-    return ''
+    return $script:TIER_CALM
 }
 
 function meta_sgr($tier) {

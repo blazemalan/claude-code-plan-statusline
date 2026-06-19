@@ -115,18 +115,17 @@ theme_default
 [[ "$(fmt_duration 3660000)" == "1h1m" ]] && ok "fmt_duration: 3660000ms -> 1h1m" || bad "fmt_duration: 3660000ms -> 1h1m"
 [[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
 
-# ── seg_cache (cache-hit efficiency: reads / (reads + writes)) ────────────────
-# High hit-rate is GOOD (green/calm); low is bad (red/urgent) — inverted from the
-# usage tiers. theme_default: TIER_CALM=32 (green), TIER_WARN=33 (yellow), TIER_URGENT=31 (red).
+# ── seg_cache (cache-freshness countdown: ↯cached M:SS / ↯cold) ───────────────
+# Pin "now" (PLAN_SL_NOW) and the anchor (PLAN_SL_CACHE_MTIME) so the countdown is
+# deterministic. left = 300 - (now - mtime). theme_default: TIER_CALM=32 (green),
+# TIER_WARN=33 (yellow, final minute), TIER_URGENT=31 (red, expired).
 theme_default; unset RAINBOW
-[[ "$(seg_cache 90 10)" == *$'\033[32m⚡90%'* ]] && ok "seg_cache: high rate -> green" || bad "seg_cache: high -> green (got '$(seg_cache 90 10)')"
-[[ "$(seg_cache 60 40)" == *$'\033[33m⚡60%'* ]] && ok "seg_cache: mid rate -> yellow" || bad "seg_cache: mid -> yellow"
-[[ "$(seg_cache 30 70)" == *$'\033[31m⚡30%'* ]] && ok "seg_cache: low rate -> red" || bad "seg_cache: low -> red"
-[[ "$(seg_cache 900 100 | strip_ansi)" == *"⚡90%"* ]] && ok "seg_cache: 900/100 -> 90%" || bad "seg_cache: 900/100 (got '$(seg_cache 900 100 | strip_ansi)')"
-[[ "$(seg_cache 945 55 | strip_ansi)" == *"⚡94%"* ]] && ok "seg_cache: floors 945/55 -> 94%" || bad "seg_cache: floors (got '$(seg_cache 945 55 | strip_ansi)')"
-[[ "$(seg_cache 100 0 | strip_ansi)" == *"⚡100%"* ]] && ok "seg_cache: all-read -> 100%" || bad "seg_cache: all-read -> 100%"
-[[ -z "$(seg_cache 0 0)" ]] && ok "seg_cache: zero total -> empty" || bad "seg_cache: zero total -> empty (got '$(seg_cache 0 0)')"
-[[ -z "$(seg_cache '' '')" ]] && ok "seg_cache: empty -> empty" || bad "seg_cache: empty -> empty"
+[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=1000000000 seg_cache 1000 50 x | strip_ansi)" == *"↯cached 5:00"* ]] && ok "seg_cache: fresh -> 5:00" || bad "seg_cache: fresh -> 5:00 (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=1000000000 seg_cache 1000 50 x | strip_ansi)')"
+[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999800 seg_cache 1000 50 x)" == *$'\033[32m↯cached 1:40'* ]] && ok "seg_cache: warm -> green 1:40" || bad "seg_cache: warm -> green (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999800 seg_cache 1000 50 x)')"
+[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999750 seg_cache 1000 50 x)" == *$'\033[33m↯cached 0:50'* ]] && ok "seg_cache: final minute -> yellow 0:50" || bad "seg_cache: final minute -> yellow"
+[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999690 seg_cache 1000 50 x)" == *$'\033[31m↯cold'* ]] && ok "seg_cache: expired -> red cold" || bad "seg_cache: expired -> red cold (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999690 seg_cache 1000 50 x)')"
+[[ -z "$(seg_cache 0 0 x)" ]] && ok "seg_cache: no cache -> empty" || bad "seg_cache: no cache -> empty (got '$(seg_cache 0 0 x)')"
+[[ -z "$(seg_cache '' '' '')" ]] && ok "seg_cache: empty -> empty" || bad "seg_cache: empty -> empty"
 
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi

@@ -359,14 +359,6 @@ function cost_tier_color($usd) {
     return $script:TIER_CALM
 }
 
-# Cache hit-rate tier — INVERTED from the usage tiers: a HIGH cache rate is GOOD
-# (calm/green), low is bad (urgent/red). Reuses each theme's TIER_* palette.
-function cache_tier_color($pct) {
-    if ($pct -ge 80) { return $script:TIER_CALM }
-    if ($pct -ge 50) { return $script:TIER_WARN }
-    return $script:TIER_URGENT
-}
-
 function meta_sgr($tier) {
     if (-not [string]::IsNullOrEmpty($script:META)) { return $script:META }
     return $tier
@@ -411,20 +403,41 @@ function seg_ctx($pctraw, $size) {
     return $res
 }
 
-# Cache-hit efficiency: of the cacheable input this turn, the share served from
-# cache (reads) vs freshly written. Rides META styling; shown only when cache
-# data is present and non-zero. Owns its separator so a zero/empty value yields
-# nothing (no dangling separator). U+26A1 (lightning) <pct>%.
-function seg_cache($cr, $cc) {
+# Prompt-cache lifetime in seconds (Anthropic's default 5-minute sliding TTL).
+$script:CACHE_TTL = 300
+
+# Cache-freshness countdown. The prompt cache has a ~5-minute SLIDING lifetime
+# (refreshed each turn); we anchor to the transcript file's last-write time
+# (≈ when the last turn landed) and count down. Shown only when there IS a cache
+# to track (cache tokens present). Owns its separator. PLAN_SL_CACHE_MTIME pins
+# the anchor for deterministic tests/cross-check, mirroring PLAN_SL_NOW.
+#   warm -> U+21AF "cached M:SS" (calm; warn-tier in the final minute); gone -> "cold" (urgent)
+function seg_cache($cr, $cc, $transcript) {
     $crT = truncate_pct $cr
     $ccT = truncate_pct $cc
     $crN = 0; $ccN = 0
     if (-not [long]::TryParse($crT, [ref]$crN)) { $crN = 0 }
     if (-not [long]::TryParse($ccT, [ref]$ccN)) { $ccN = 0 }
     if (($crN + $ccN) -le 0) { return '' }
-    $pct = [math]::Truncate(($crN * 100) / ($crN + $ccN))
+    $mtime = $null
+    if (-not [string]::IsNullOrEmpty($env:PLAN_SL_CACHE_MTIME)) {
+        $mv = [long]0
+        if ([long]::TryParse($env:PLAN_SL_CACHE_MTIME, [ref]$mv)) { $mtime = $mv }
+    } elseif ((-not [string]::IsNullOrEmpty($transcript)) -and (Test-Path -LiteralPath $transcript -PathType Leaf)) {
+        try { $mtime = ([DateTimeOffset]((Get-Item -LiteralPath $transcript).LastWriteTimeUtc)).ToUnixTimeSeconds() } catch { $mtime = $null }
+    }
+    if ($null -eq $mtime) { return '' }
+    $bolt = [char]0x21AF
+    $left = $script:CACHE_TTL - ((now_epoch) - $mtime)
     $res = paint_sep
-    $res += paint (cache_tier_color $pct) "$([char]0x26A1)${pct}%"
+    if ($left -le 0) {
+        $res += paint $script:TIER_URGENT "${bolt}cold"
+    } else {
+        $tier = if ($left -le 60) { $script:TIER_WARN } else { $script:TIER_CALM }
+        $mm = [int][math]::Floor($left / 60)
+        $ss = [int]($left % 60)
+        $res += paint $tier ("${bolt}cached {0}:{1:D2}" -f $mm, $ss)
+    }
     return $res
 }
 
@@ -519,7 +532,7 @@ function render_line() {
         $res += seg_ctx $script:ctx_pct $size
     }
 
-    $res += seg_cache $script:cache_read $script:cache_creation
+    $res += seg_cache $script:cache_read $script:cache_creation $script:transcript_path
 
     return $res
 }
@@ -542,6 +555,7 @@ function Main() {
     $script:out_tokens = ''
     $script:cache_read = ''
     $script:cache_creation = ''
+    $script:transcript_path = ''
 
     $parsed = $null
     try {
@@ -580,6 +594,7 @@ function Main() {
                 if ($null -ne $parsed.context_window.current_usage.cache_creation_input_tokens) { $script:cache_creation = $parsed.context_window.current_usage.cache_creation_input_tokens.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
             }
         }
+        if ($null -ne $parsed.transcript_path) { $script:transcript_path = $parsed.transcript_path.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
         if ($null -ne $parsed.cost) {
             if ($null -ne $parsed.cost.total_cost_usd) { $script:cost_usd = $parsed.cost.total_cost_usd.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
             if ($null -ne $parsed.cost.total_duration_ms) { $script:dur_ms = $parsed.cost.total_duration_ms.ToString([System.Globalization.CultureInfo]::InvariantCulture) }

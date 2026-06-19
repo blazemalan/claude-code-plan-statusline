@@ -1,4 +1,4 @@
-﻿param()
+param()
 
 $ESC = [char]27
 # Honors NO_COLOR (https://no-color.org): any non-empty value suppresses all ANSI.

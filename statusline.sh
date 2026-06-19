@@ -114,7 +114,7 @@ fmt_when() {
 ctx_circle() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
-  is_int "$pct" || return
+  is_int "$pct" || { printf "○"; return; }
   if   ((pct >= 88)); then printf '●'
   elif ((pct >= 63)); then printf '◕'
   elif ((pct >= 38)); then printf '◑'
@@ -383,7 +383,7 @@ paint_sep() {
 tier_color() {
   local pct=${1%.*}
   [[ -z "$pct" ]] && return
-  is_int "$pct" || return
+  is_int "$pct" || { printf "○"; return; }
   if   (( pct >= 90 )); then printf '%s' "$TIER_URGENT"
   elif (( pct >= 70 )); then printf '%s' "$TIER_HOT"
   elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
@@ -421,7 +421,7 @@ span_sgr() { if [[ "$1" == '@tier' ]]; then printf '%s' "$2"; else printf '%s' "
 seg_rate() {
   local label=$1 pctraw=$2 reset_str=$3
   local pct=${pctraw%.*}
-  is_int "$pct" || return
+  is_int "$pct" || { printf "○"; return; }
   if (( pct >= 100 )); then egg "$label" "$reset_str"; return; fi
   local tier; tier=$(tier_color "$pct")
   if (( SEG_CIRCLE )); then
@@ -440,7 +440,7 @@ seg_rate() {
 seg_ctx() {
   local pctraw=$1 size=$2
   local pct=${pctraw%.*}
-  is_int "$pct" || return
+  is_int "$pct" || { printf "○"; return; }
   local tier; tier=$(tier_color "$pct")
   paint "$(span_sgr "$CIRCLE_SGR" "$tier")" "$(ctx_circle "$pct")"; printf ' '
   paint "$tier" "${pct}%"

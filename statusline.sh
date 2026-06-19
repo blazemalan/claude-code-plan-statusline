@@ -53,7 +53,9 @@ date_fmt() {
 # easter-egg flash and fmt_when's "is the reset today?" check both depend on
 # the current time; pinning it lets tests — and the bash<->PowerShell parity
 # cross-check — produce byte-stable output).
+# Cached in _CACHED_NOW during render_line to avoid redundant process forks.
 now_epoch() {
+  if [[ -n "${_CACHED_NOW:-}" ]]; then printf '%s' "$_CACHED_NOW"; return; fi
   printf '%s' "${PLAN_SL_NOW:-$(date +%s)}"
 }
 
@@ -98,7 +100,8 @@ fmt_duration() {
 fmt_when() {
   local epoch=$1
   [[ -z "$epoch" ]] && return
-  if [[ "$(date_fmt "$epoch" "+%Y-%m-%d")" == "$(date_fmt "$(now_epoch)" "+%Y-%m-%d")" ]]; then
+  local today; today="${_CACHED_TODAY:-$(date_fmt "$(now_epoch)" "+%Y-%m-%d")}"
+  if [[ "$(date_fmt "$epoch" "+%Y-%m-%d")" == "$today" ]]; then
     fmt_time "$epoch"
   else
     date_fmt "$epoch" "+%a" | tr '[:upper:]' '[:lower:]'
@@ -366,7 +369,7 @@ paint() {
 paint_sep() {
   if [[ -n "${SEP_ANIM:-}" ]]; then
     local -a frames; IFS='|' read -ra frames <<< "$SEP_ANIM"
-    local now; now=$(now_epoch)
+    local now; now="${_CACHED_NOW:-$(now_epoch)}"
     paint "$SEP_COLOR" " ${frames[$(( now % ${#frames[@]} ))]} "
   else
     paint "$SEP_COLOR" "$SEP"
@@ -443,7 +446,8 @@ seg_ctx() {
 # empty (default), matching the originals.
 egg() {
   local label=$1 reset_str=$2 msg col lblcol
-  if (( $(now_epoch) % 2 )) && [[ "$EGG_MSG_A" != "$EGG_MSG_B" ]]; then
+  local now="${_CACHED_NOW:-$(now_epoch)}"
+  if (( now % 2 )) && [[ "$EGG_MSG_A" != "$EGG_MSG_B" ]]; then
     msg=$EGG_MSG_B; col=$EGG_COLOR_B
   else
     msg=$EGG_MSG_A; col=$EGG_COLOR_A
@@ -466,6 +470,10 @@ egg() {
 
 # The one renderer: swept model name, then any present segments joined by SEP.
 render_line() {
+  local _CACHED_NOW; _CACHED_NOW="${PLAN_SL_NOW:-$(date +%s)}"
+  # shellcheck disable=SC2034 # Read dynamically by fmt_when
+  local _CACHED_TODAY; _CACHED_TODAY="$(date_fmt "$_CACHED_NOW" "+%Y-%m-%d")"
+
   # Enterprise/managed payloads carry no rate_limits; default the fields they
   # DO carry to empty so plan-mode callers under `set -u` (tests, etc.) that
   # never set them don't trip the unbound-variable guard.
@@ -475,7 +483,7 @@ render_line() {
 
   # Rainbow Road: restart the hue sweep each render and reseed its phase from the
   # clock (× speed), so the rainbow advances RAINBOW_SPEED hues per repaint.
-  [[ -n "${RAINBOW:-}" ]] && { _HUE=0; RAINBOW_PHASE=$(( $(now_epoch) * RAINBOW_SPEED )); }
+  [[ -n "${RAINBOW:-}" ]] && { _HUE=0; RAINBOW_PHASE=$(( _CACHED_NOW * RAINBOW_SPEED )); }
 
   # Nothing to show yet (fresh session, before the first API response).
   if [[ -z "$ctx_pct" && -z "$five_pct" && -z "$week_pct" && -z "$cost_usd" ]]; then

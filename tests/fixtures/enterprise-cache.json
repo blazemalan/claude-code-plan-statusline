@@ -1,0 +1,12 @@
+{
+  "model": { "display_name": "Claude" },
+  "cost": { "total_cost_usd": 1.23, "total_duration_ms": 65000 },
+  "context_window": {
+    "used_percentage": 40,
+    "context_window_size": 200000,
+    "current_usage": {
+      "cache_read_input_tokens": 10000,
+      "cache_creation_input_tokens": 20000
+    }
+  }
+}

@@ -115,6 +115,14 @@ theme_default
 [[ "$(fmt_duration 3660000)" == "1h1m" ]] && ok "fmt_duration: 3660000ms -> 1h1m" || bad "fmt_duration: 3660000ms -> 1h1m"
 [[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
 
+# ── seg_cache (cache-hit efficiency: reads / (reads + writes)) ────────────────
+theme_default
+[[ "$(seg_cache 900 100 | strip_ansi)" == *"⚡90%"* ]] && ok "seg_cache: 900/100 -> 90%" || bad "seg_cache: 900/100 (got '$(seg_cache 900 100 | strip_ansi)')"
+[[ "$(seg_cache 945 55 | strip_ansi)" == *"⚡94%"* ]] && ok "seg_cache: floors 945/55 -> 94%" || bad "seg_cache: floors (got '$(seg_cache 945 55 | strip_ansi)')"
+[[ "$(seg_cache 100 0 | strip_ansi)" == *"⚡100%"* ]] && ok "seg_cache: all-read -> 100%" || bad "seg_cache: all-read -> 100%"
+[[ -z "$(seg_cache 0 0)" ]] && ok "seg_cache: zero total -> empty" || bad "seg_cache: zero total -> empty (got '$(seg_cache 0 0)')"
+[[ -z "$(seg_cache '' '')" ]] && ok "seg_cache: empty -> empty" || bad "seg_cache: empty -> empty"
+
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi
 echo "All unit tests passed."

@@ -160,5 +160,22 @@ assert_renders glow    "$PEGGED" "1UP"
 assert_renders scrubs  "$PEGGED" "defib"
 assert_renders default "$PEGGED" "100% 💀"
 
+# --- cache-efficiency segment (current_usage cache tokens -> ⚡<pct>%) ---
+cache_plain=$(
+  five_pct=42 five_reset=1746234000 week_pct=78 week_reset=1746500400 \
+  ctx_pct=15 ctx_size=1000000 cache_read=94500 cache_creation=5500 model='Opus 4.8' \
+  bash -c "source ./statusline.sh; theme_default; render_line" | strip_ansi
+)
+[[ "$cache_plain" == *"⚡94%"* ]] && printf 'PASS cache segment renders (matched ⚡94%%)\n' \
+  || { printf 'FAIL cache segment\n  got: %s\n' "$cache_plain" >&2; exit 1; }
+
+nocache_plain=$(
+  five_pct=42 five_reset=1746234000 week_pct=78 week_reset=1746500400 \
+  ctx_pct=15 ctx_size=1000000 model='Opus 4.8' \
+  bash -c "source ./statusline.sh; theme_default; render_line" | strip_ansi
+)
+[[ "$nocache_plain" != *"⚡"* ]] && printf 'PASS no cache data -> no cache segment\n' \
+  || { printf 'FAIL unexpected cache segment\n  got: %s\n' "$nocache_plain" >&2; exit 1; }
+
 echo
 echo "All dispatch tests passed."

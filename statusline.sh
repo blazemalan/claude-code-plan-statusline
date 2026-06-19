@@ -450,6 +450,20 @@ seg_ctx() {
   [[ -n "$size" ]] && paint "$(meta_sgr "$tier")" "$size"
 }
 
+# Cache-hit efficiency: of the cacheable input this turn, the share served from
+# cache (reads) vs freshly written. Rides META styling; shown only when cache
+# data is present and non-zero. Owns its separator so a zero/empty value prints
+# nothing (no dangling separator). ⚡<pct>%.
+seg_cache() {
+  local cr=${1%.*} cc=${2%.*}
+  is_int "$cr" || cr=0
+  is_int "$cc" || cc=0
+  if (( cr + cc > 0 )); then
+    paint_sep
+    paint "$(meta_sgr '')" "⚡$(( cr * 100 / (cr + cc) ))%"
+  fi
+}
+
 # 100% easter egg for a rate segment. Flashes A<->B per second when they differ.
 # The label is colored like the message EXCEPT when LABEL_SGR is empty (hearth),
 # where it stays default-fg. The reset clause uses META, or plain when META is
@@ -489,7 +503,8 @@ render_line() {
   # never set them don't trip the unbound-variable guard.
   local cost_usd=${cost_usd:-} dur_ms=${dur_ms:-} \
         lines_added=${lines_added:-} lines_removed=${lines_removed:-} \
-        in_tokens=${in_tokens:-} out_tokens=${out_tokens:-}
+        in_tokens=${in_tokens:-} out_tokens=${out_tokens:-} \
+        cache_read=${cache_read:-} cache_creation=${cache_creation:-}
 
   # Rainbow Road: restart the hue sweep each render and reseed its phase from the
   # clock (× speed), so the rainbow advances RAINBOW_SPEED hues per repaint.
@@ -526,6 +541,9 @@ render_line() {
     local size=''; [[ -n "$ctx_size" ]] && size=" of $(fmt_size "$ctx_size")"
     paint_sep; seg_ctx "$ctx_pct" "$size"
   fi
+
+  # Cache-hit efficiency renders in both modes (per-turn, independent of limits).
+  seg_cache "$cache_read" "$cache_creation"
 }
 
 # ============================================================================
@@ -550,15 +568,16 @@ main() {
     done < "$config_file"
   fi
 
-  # --- Parse stdin JSON (one jq call into 13 vars) ---
-  # First 7 are the Pro/Max plan fields; the last 6 are the Enterprise/managed
-  # fields (that payload has no rate_limits). Join with the ASCII unit separator
+  # --- Parse stdin JSON (one jq call into 15 vars) ---
+  # First 7 are the Pro/Max plan fields; the next 6 are the Enterprise/managed
+  # fields (that payload has no rate_limits); the last 2 are prompt-cache token
+  # counts (from context_window.current_usage). Join with the ASCII unit separator
   # (\x1f), NOT @tsv: tab counts as IFS *whitespace*, so bash `read` collapses
   # consecutive tabs and empty fields shift everything left (a missing context %
   # once rendered the 1M window size as "1000000%"). Non-whitespace delimiters
   # preserve empty fields.
   IFS=$'\x1f' read -r model five_pct five_reset week_pct week_reset ctx_pct ctx_size \
-    cost_usd dur_ms lines_added lines_removed in_tokens out_tokens < <(
+    cost_usd dur_ms lines_added lines_removed in_tokens out_tokens cache_read cache_creation < <(
     printf '%s' "$input" | jq -r '[
       .model.display_name // .model.id // "Claude",
       .rate_limits.five_hour.used_percentage // "",
@@ -572,10 +591,12 @@ main() {
       .cost.total_lines_added // "",
       .cost.total_lines_removed // "",
       .context_window.total_input_tokens // "",
-      .context_window.total_output_tokens // ""
+      .context_window.total_output_tokens // "",
+      .context_window.current_usage.cache_read_input_tokens // "",
+      .context_window.current_usage.cache_creation_input_tokens // ""
     ] | map(tostring) | join("\u001f")' 2>/dev/null
   )
-  out_tokens=${out_tokens%$'\r'}
+  cache_creation=${cache_creation%$'\r'}
 
   # Malformed / empty stdin: jq emits nothing (its parse error is suppressed
   # above so it can't leak into the statusline), `read` leaves every field

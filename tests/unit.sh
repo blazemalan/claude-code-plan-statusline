@@ -116,7 +116,12 @@ theme_default
 [[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
 
 # ── seg_cache (cache-hit efficiency: reads / (reads + writes)) ────────────────
-theme_default
+# High hit-rate is GOOD (green/calm); low is bad (red/urgent) — inverted from the
+# usage tiers. theme_default: TIER_CALM=32 (green), TIER_WARN=33 (yellow), TIER_URGENT=31 (red).
+theme_default; unset RAINBOW
+[[ "$(seg_cache 90 10)" == *$'\033[32m⚡90%'* ]] && ok "seg_cache: high rate -> green" || bad "seg_cache: high -> green (got '$(seg_cache 90 10)')"
+[[ "$(seg_cache 60 40)" == *$'\033[33m⚡60%'* ]] && ok "seg_cache: mid rate -> yellow" || bad "seg_cache: mid -> yellow"
+[[ "$(seg_cache 30 70)" == *$'\033[31m⚡30%'* ]] && ok "seg_cache: low rate -> red" || bad "seg_cache: low -> red"
 [[ "$(seg_cache 900 100 | strip_ansi)" == *"⚡90%"* ]] && ok "seg_cache: 900/100 -> 90%" || bad "seg_cache: 900/100 (got '$(seg_cache 900 100 | strip_ansi)')"
 [[ "$(seg_cache 945 55 | strip_ansi)" == *"⚡94%"* ]] && ok "seg_cache: floors 945/55 -> 94%" || bad "seg_cache: floors (got '$(seg_cache 945 55 | strip_ansi)')"
 [[ "$(seg_cache 100 0 | strip_ansi)" == *"⚡100%"* ]] && ok "seg_cache: all-read -> 100%" || bad "seg_cache: all-read -> 100%"

@@ -411,6 +411,17 @@ cost_tier_color() {
   fi
 }
 
+# Cache hit-rate tier — INVERTED from the usage tiers: a HIGH cache rate is GOOD
+# (calm/green), low is bad (urgent/red). Reuses each theme's TIER_* palette, so
+# thresholds (good >=80, ok >=50, else poor) recolor per theme automatically.
+cache_tier_color() {
+  local pct=$1
+  if   (( pct >= 80 )); then printf '%s' "$TIER_CALM"
+  elif (( pct >= 50 )); then printf '%s' "$TIER_WARN"
+  else                       printf '%s' "$TIER_URGENT"
+  fi
+}
+
 # Meta SGR: explicit META if set, else inherit the segment's tier SGR
 # (so default's reset times / size label match the value color, as before).
 meta_sgr() { if [[ -n "$META" ]]; then printf '%s' "$META"; else printf '%s' "$1"; fi; }
@@ -459,8 +470,9 @@ seg_cache() {
   is_int "$cr" || cr=0
   is_int "$cc" || cc=0
   if (( cr + cc > 0 )); then
+    local pct=$(( cr * 100 / (cr + cc) ))
     paint_sep
-    paint "$(meta_sgr '')" "⚡$(( cr * 100 / (cr + cc) ))%"
+    paint "$(cache_tier_color "$pct")" "⚡${pct}%"
   fi
 }
 

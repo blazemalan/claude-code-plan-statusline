@@ -359,6 +359,14 @@ function cost_tier_color($usd) {
     return $script:TIER_CALM
 }
 
+# Cache hit-rate tier — INVERTED from the usage tiers: a HIGH cache rate is GOOD
+# (calm/green), low is bad (urgent/red). Reuses each theme's TIER_* palette.
+function cache_tier_color($pct) {
+    if ($pct -ge 80) { return $script:TIER_CALM }
+    if ($pct -ge 50) { return $script:TIER_WARN }
+    return $script:TIER_URGENT
+}
+
 function meta_sgr($tier) {
     if (-not [string]::IsNullOrEmpty($script:META)) { return $script:META }
     return $tier
@@ -416,7 +424,7 @@ function seg_cache($cr, $cc) {
     if (($crN + $ccN) -le 0) { return '' }
     $pct = [math]::Truncate(($crN * 100) / ($crN + $ccN))
     $res = paint_sep
-    $res += paint (meta_sgr '') "$([char]0x26A1)${pct}%"
+    $res += paint (cache_tier_color $pct) "$([char]0x26A1)${pct}%"
     return $res
 }
 

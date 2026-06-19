@@ -567,6 +567,7 @@ main() {
       .context_window.total_output_tokens // ""
     ] | map(tostring) | join("\u001f")' 2>/dev/null
   )
+  out_tokens=${out_tokens%$'\r'}
 
   # Malformed / empty stdin: jq emits nothing (its parse error is suppressed
   # above so it can't leak into the statusline), `read` leaves every field

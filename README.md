@@ -156,7 +156,7 @@ Managed and Enterprise deployments don't receive a `rate_limits` block — there
 Opus 4.8 (1M context) │ $1.01 │ 2m16s │ +1/-0 │ 63k↑ 248↓ │ ○ 6% of 1M
 ```
 
-Left to right: **session cost** (API-equivalent USD), **wall-clock duration**, **lines changed**, **tokens in ↑ / out ↓**, and the same context circle. Cost carries the green→red scale (green `<$2`, yellow `≥$2`, orange `≥$5`, red `≥$10` — tunable in `cost_tier_color`); the rest render dimmed. Detection is automatic and needs no config: rate limits present → the `5h`/`week` view; absent → the dashboard. One script serves both.
+Left to right: **session cost** (API-equivalent USD), **wall-clock duration**, **lines changed**, **tokens in ↑ / out ↓**, and the same context circle. Cost carries the green→red scale (green `<$2`, yellow `≥$2`, orange `≥$5`, red `≥$10` — built-in to the `cost_tier_color` function); the rest render dimmed. Detection is automatic and needs no config: rate limits present → the `5h`/`week` view; absent → the dashboard. One script serves both.
 
 ## How it works
 

@@ -13,6 +13,7 @@ A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keep
 - **Real plan usage, not dollar cost** — your 5-hour and weekly rate-limit windows and when they reset, read straight from Claude Code's own data.
 - **Pro, Max, and Enterprise** — auto-detects your plan: rate-limit windows on Pro/Max, a session dashboard (cost · duration · tokens) on managed/Enterprise plans that have no windows.
 - **Per-chat context gauge** — how full the current conversation's context window is, at a glance.
+- **Cache-freshness countdown** — a `↯cached M:SS` clock counting down the prompt cache's ~5-minute sliding window (anchored to your last turn). Green while warm, yellow in the final minute, and a red `↯cold` once it expires — so you can see at a glance when your next message will re-read the whole context (re-spending cost / plan quota) instead of reusing the cache. Needs `"refreshInterval": 1` in your `statusLine` settings to tick live.
 - **Twelve built-in themes** — including animated ones (slime drips; rainbow flows) and four ported from Oh My Posh palettes (Dracula, Nord, Gruvbox, Catppuccin) — switch instantly with no restart, or ask Claude Code to invent a new one.
 - **No network, no auth** — reads only the JSON Claude Code already pipes in; never touches your credentials.
 - **Portable** — macOS, Linux, WSL, and native Windows. The bash version needs only `jq`; the PowerShell version (`statusline.ps1`) needs **zero installs** (PowerShell 5.1+ built-ins). The two render byte-identical output — a cross-check test diffs them on every fixture.

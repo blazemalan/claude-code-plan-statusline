@@ -39,10 +39,10 @@ for tz in "${TIMEZONES[@]}"; do
         fixture_name=$(basename "$fixture")
 
         # Run bash script
-        out_bash=$(TZ="$tz" LC_ALL=C PLAN_SL_NOW="$epoch" NO_COLOR="$nc" HOME="$TEMP_HOME" bash statusline.sh < "$fixture")
+        out_bash=$(TZ="$tz" LC_ALL=C PLAN_SL_NOW="$epoch" PLAN_SL_CACHE_MTIME=999999900 NO_COLOR="$nc" HOME="$TEMP_HOME" bash statusline.sh < "$fixture")
 
         # Run pwsh script
-        out_pwsh=$(TZ="$tz" LC_ALL=C PLAN_SL_NOW="$epoch" NO_COLOR="$nc" HOME="$TEMP_HOME" pwsh -NoProfile -File statusline.ps1 < "$fixture")
+        out_pwsh=$(TZ="$tz" LC_ALL=C PLAN_SL_NOW="$epoch" PLAN_SL_CACHE_MTIME=999999900 NO_COLOR="$nc" HOME="$TEMP_HOME" pwsh -NoProfile -File statusline.ps1 < "$fixture")
 
         TOTAL_CHECKS=$((TOTAL_CHECKS + 1))
 

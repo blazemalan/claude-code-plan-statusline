@@ -115,18 +115,6 @@ theme_default
 [[ "$(fmt_duration 3660000)" == "1h1m" ]] && ok "fmt_duration: 3660000ms -> 1h1m" || bad "fmt_duration: 3660000ms -> 1h1m"
 [[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
 
-# ── seg_cache (cache-freshness countdown: ↯cached M:SS / ↯cold) ───────────────
-# Pin "now" (PLAN_SL_NOW) and the anchor (PLAN_SL_CACHE_MTIME) so the countdown is
-# deterministic. left = 300 - (now - mtime). theme_default: TIER_CALM=32 (green),
-# TIER_WARN=33 (yellow, final minute), TIER_URGENT=31 (red, expired).
-theme_default; unset RAINBOW
-[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=1000000000 seg_cache 1000 50 x | strip_ansi)" == *"↯cached 5:00"* ]] && ok "seg_cache: fresh -> 5:00" || bad "seg_cache: fresh -> 5:00 (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=1000000000 seg_cache 1000 50 x | strip_ansi)')"
-[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999800 seg_cache 1000 50 x)" == *$'\033[32m↯cached 1:40'* ]] && ok "seg_cache: warm -> green 1:40" || bad "seg_cache: warm -> green (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999800 seg_cache 1000 50 x)')"
-[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999750 seg_cache 1000 50 x)" == *$'\033[33m↯cached 0:50'* ]] && ok "seg_cache: final minute -> yellow 0:50" || bad "seg_cache: final minute -> yellow"
-[[ "$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999690 seg_cache 1000 50 x)" == *$'\033[31m↯cold'* ]] && ok "seg_cache: expired -> red cold" || bad "seg_cache: expired -> red cold (got '$(PLAN_SL_NOW=1000000000 PLAN_SL_CACHE_MTIME=999999690 seg_cache 1000 50 x)')"
-[[ -z "$(seg_cache 0 0 x)" ]] && ok "seg_cache: no cache -> empty" || bad "seg_cache: no cache -> empty (got '$(seg_cache 0 0 x)')"
-[[ -z "$(seg_cache '' '' '')" ]] && ok "seg_cache: empty -> empty" || bad "seg_cache: empty -> empty"
-
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi
 echo "All unit tests passed."

@@ -13,7 +13,6 @@ A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keep
 - **Real plan usage, not dollar cost** — your 5-hour and weekly rate-limit windows and when they reset, read straight from Claude Code's own data.
 - **Pro, Max, and Enterprise** — auto-detects your plan: rate-limit windows on Pro/Max, a session dashboard (cost · duration · tokens) on managed/Enterprise plans that have no windows.
 - **Per-chat context gauge** — how full the current conversation's context window is, at a glance.
-- **Cache-freshness countdown** — a `↯cached M:SS` clock counting down the prompt cache's ~5-minute sliding window (anchored to your last turn). Green while warm, yellow in the final minute, and a red `↯cold` once it expires — so you can see at a glance when your next message will re-read the whole context (re-spending cost / plan quota) instead of reusing the cache. Needs `"refreshInterval": 1` in your `statusLine` settings to tick live.
 - **Twelve built-in themes** — including animated ones (slime drips; rainbow flows) and four ported from Oh My Posh palettes (Dracula, Nord, Gruvbox, Catppuccin) — switch instantly with no restart, or ask Claude Code to invent a new one.
 - **No network, no auth** — reads only the JSON Claude Code already pipes in; never touches your credentials.
 - **Portable** — macOS, Linux, WSL, and native Windows. The bash version needs only `jq`; the PowerShell version (`statusline.ps1`) needs **zero installs** (PowerShell 5.1+ built-ins). The two render byte-identical output — a cross-check test diffs them on every fixture.
@@ -32,29 +31,10 @@ Reading the Pro/Max line left to right:
 - **`5h: 14% (→11:00am)`** — your 5-hour rolling plan window and when it resets (local time).
 - **`week: 47% (→thu)`** — your 7-day rolling window. It shows a clock time when the reset is today and the lowercase weekday otherwise, so you can tell at a glance whether the limit comes back today or in a few days.
 - **`○ 6% of 1M`** — context-window fill for *the current chat*. This is **not** a plan limit — it's how much of the model's working memory the conversation has consumed (6% of 1,000,000 tokens here). It only grows as the chat gets longer; starting a new chat clears it. The circle (`○ ◔ ◑ ◕ ●`) is a five-step visual of the same percentage.
-- **`↯cached 4:32`** — a live **cache-freshness countdown**: how long until Anthropic's prompt cache expires and your next message re-reads the whole conversation at full price. Green while warm, red `↯cold` once it's gone. See [Cache freshness](#cache-freshness).
 
-The rate and context percentages share one color scale: green → yellow → orange → red as they climb. The cache countdown runs the other way — green with plenty of time left, red when it's out.
+All three percentages share one color scale: green → yellow → orange → red as they climb.
 
 On Enterprise/managed plans the layout adapts automatically — see [Enterprise / managed plans](#enterprise--managed-plans).
-
-## Cache freshness
-
-Anthropic's [prompt cache](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) is what makes a long Claude Code session cheap and fast: each turn reuses the conversation so far at a fraction of the token price instead of re-reading the whole thing. But the cache has a **~5-minute sliding lifetime** — every message you send refreshes it, but step away (or get pulled into another chat) for five-plus minutes and it **silently expires**. Your next message then re-reads the entire context from scratch: real money if you're on the API, a real bite out of your rolling rate-limit windows if you're on Pro/Max.
-
-You can't normally *see* any of that. The `↯cached M:SS` segment turns it into a live countdown:
-
-| State | Looks like | Means |
-| --- | --- | --- |
-| Warm | `↯cached 4:32` (green) | Plenty of cache left — keep going. |
-| Final minute | `↯cached 0:38` (yellow) | About to expire — send something to keep it warm. |
-| Expired | `↯cold` (red) | Gone. Your next message re-reads the whole context. |
-
-It ticks down on its own and snaps back to ~5:00 the instant you send a message. Because it **decays by itself**, it can't lie — a static "cached ✓" badge would still claim "cached" five minutes after you walked away, but this can't: when it says `cold`, the cache really is cold. The anchor is your conversation transcript's last-write time (≈ "your last turn"), read straight from stdin — no network, no state file, no extra moving parts.
-
-> **Make it tick live:** add `"refreshInterval": 1` to your `statusLine` block in `settings.json` so Claude Code re-runs the statusline every second and the clock visibly counts down. This costs **zero** Claude usage — the statusline is a local script that never calls Anthropic; it just re-reads data Claude Code already has. Without `refreshInterval` the countdown still updates, just only when the line refreshes for some other reason.
-
-The segment appears only once your session has cache activity.
 
 ## Install
 
@@ -64,14 +44,14 @@ The segment appears only once your session has cache activity.
 
 > Please install the plan-statusline from https://github.com/blazemalan/claude-code-plan-statusline for me:
 > 1. Download https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.sh to `~/.claude/hooks/plan-statusline.sh` and make it executable.
-> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `bash ~/.claude/hooks/plan-statusline.sh` and sets `"refreshInterval": 1` (so the cache-freshness countdown ticks live), preserving all existing keys.
+> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `bash ~/.claude/hooks/plan-statusline.sh`, preserving all existing keys.
 > 3. Make sure `jq` is installed (`brew install jq` if not).
 
 **Windows (native, nothing to install)** — paste this instead:
 
 > Please install the plan-statusline (Windows PowerShell version) from https://github.com/blazemalan/claude-code-plan-statusline for me:
 > 1. Download https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.ps1 to `~/.claude/hooks/plan-statusline.ps1`, preserving its UTF-8 BOM.
-> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `powershell -NoProfile -ExecutionPolicy Bypass -File <the absolute path to that file, with forward slashes>` and sets `"refreshInterval": 1` (so the cache-freshness countdown ticks live), preserving all existing keys.
+> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `powershell -NoProfile -ExecutionPolicy Bypass -File <the absolute path to that file, with forward slashes>`, preserving all existing keys.
 > Nothing else to install — it's pure PowerShell 5.1+ built-ins.
 
 Claude Code does the file work and the settings edit, asking permission as it goes.
@@ -91,8 +71,7 @@ Then merge this into `~/.claude/settings.json`:
 {
   "statusLine": {
     "type": "command",
-    "command": "bash ~/.claude/hooks/plan-statusline.sh",
-    "refreshInterval": 1
+    "command": "bash ~/.claude/hooks/plan-statusline.sh"
   }
 }
 ```
@@ -119,8 +98,7 @@ Then merge this into `%USERPROFILE%\.claude\settings.json`, replacing `YOURNAME`
 {
   "statusLine": {
     "type": "command",
-    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/YOURNAME/.claude/hooks/plan-statusline.ps1",
-    "refreshInterval": 1
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/YOURNAME/.claude/hooks/plan-statusline.ps1"
   }
 }
 ```
@@ -193,16 +171,12 @@ Since Claude Code v2.1.80, the statusline command receives a JSON blob on stdin 
   },
   "context_window": {
     "used_percentage": 6,
-    "context_window_size": 1000000,
-    "current_usage": { "cache_read_input_tokens": 94000, "cache_creation_input_tokens": 6000 }
-  },
-  "transcript_path": "/Users/you/.claude/projects/<project>/<session>.jsonl"
+    "context_window_size": 1000000
+  }
 }
 ```
 
 The script parses it with `jq`, picks the percentages and reset epochs, color-formats them, and prints. No network, no auth. One data-driven renderer feeds every theme.
-
-The [cache-freshness countdown](#cache-freshness) reads two more things from that same blob: `context_window.current_usage` (to know a prompt cache exists) and `transcript_path` (whose file modified-time ≈ your last turn). It counts down from the 5-minute cache lifetime — still entirely from stdin, still no network.
 
 The `rate_limits` field appears only for Pro/Max subscribers, and only after the first API response in a session — until then the statusline shows `usage data pending - make a request`. (Enterprise/managed plans never send it; see [above](#enterprise--managed-plans).)
 

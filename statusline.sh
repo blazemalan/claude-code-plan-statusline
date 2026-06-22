@@ -51,10 +51,6 @@ date_fmt() {
 
 is_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
 
-# Prompt-cache lifetime in seconds (Anthropic's default 5-minute sliding TTL).
-# The cache-freshness segment counts down from this. Tunable in one place.
-CACHE_TTL=300
-
 # "Now" as an epoch. PLAN_SL_NOW overrides for deterministic tests (the 100%
 # easter-egg flash and fmt_when's "is the reset today?" check both depend on
 # the current time; pinning it lets tests — and the bash<->PowerShell parity
@@ -454,34 +450,6 @@ seg_ctx() {
   [[ -n "$size" ]] && paint "$(meta_sgr "$tier")" "$size"
 }
 
-# Cache-freshness countdown. The prompt cache has a ~5-minute SLIDING lifetime
-# (refreshed each turn); we anchor to the transcript file's last-write time
-# (≈ when the last turn landed) and count down. Shown only when there IS a cache
-# to track (cache tokens present). Owns its separator. PLAN_SL_CACHE_MTIME pins
-# the anchor for deterministic tests/cross-check, mirroring PLAN_SL_NOW.
-#   warm -> "↯cached M:SS" (calm; warn-tier in the final minute); gone -> "↯cold" (urgent)
-seg_cache() {
-  local cr=${1%.*} cc=${2%.*} transcript=$3
-  is_int "$cr" || cr=0
-  is_int "$cc" || cc=0
-  local mtime=''
-  if [[ -n "${PLAN_SL_CACHE_MTIME:-}" ]]; then
-    mtime=$PLAN_SL_CACHE_MTIME
-  elif [[ -n "$transcript" && -f "$transcript" ]]; then
-    mtime=$(stat -c %Y "$transcript" 2>/dev/null || stat -f %m "$transcript" 2>/dev/null)
-  fi
-  if (( cr + cc > 0 )) && is_int "$mtime"; then
-    local left=$(( CACHE_TTL - ($(now_epoch) - mtime) ))
-    paint_sep
-    if (( left <= 0 )); then
-      paint "$TIER_URGENT" '↯cold'
-    else
-      local tier; if (( left <= 60 )); then tier=$TIER_WARN; else tier=$TIER_CALM; fi
-      paint "$tier" "$(printf '↯cached %d:%02d' $(( left / 60 )) $(( left % 60 )))"
-    fi
-  fi
-}
-
 # 100% easter egg for a rate segment. Flashes A<->B per second when they differ.
 # The label is colored like the message EXCEPT when LABEL_SGR is empty (hearth),
 # where it stays default-fg. The reset clause uses META, or plain when META is
@@ -521,9 +489,7 @@ render_line() {
   # never set them don't trip the unbound-variable guard.
   local cost_usd=${cost_usd:-} dur_ms=${dur_ms:-} \
         lines_added=${lines_added:-} lines_removed=${lines_removed:-} \
-        in_tokens=${in_tokens:-} out_tokens=${out_tokens:-} \
-        cache_read=${cache_read:-} cache_creation=${cache_creation:-} \
-        transcript_path=${transcript_path:-}
+        in_tokens=${in_tokens:-} out_tokens=${out_tokens:-}
 
   # Rainbow Road: restart the hue sweep each render and reseed its phase from the
   # clock (× speed), so the rainbow advances RAINBOW_SPEED hues per repaint.
@@ -560,9 +526,6 @@ render_line() {
     local size=''; [[ -n "$ctx_size" ]] && size=" of $(fmt_size "$ctx_size")"
     paint_sep; seg_ctx "$ctx_pct" "$size"
   fi
-
-  # Cache-hit efficiency renders in both modes (per-turn, independent of limits).
-  seg_cache "$cache_read" "$cache_creation" "$transcript_path"
 }
 
 # ============================================================================
@@ -587,16 +550,15 @@ main() {
     done < "$config_file"
   fi
 
-  # --- Parse stdin JSON (one jq call into 15 vars) ---
-  # First 7 are the Pro/Max plan fields; the next 6 are the Enterprise/managed
-  # fields (that payload has no rate_limits); the last 2 are prompt-cache token
-  # counts (from context_window.current_usage). Join with the ASCII unit separator
+  # --- Parse stdin JSON (one jq call into 13 vars) ---
+  # First 7 are the Pro/Max plan fields; the last 6 are the Enterprise/managed
+  # fields (that payload has no rate_limits). Join with the ASCII unit separator
   # (\x1f), NOT @tsv: tab counts as IFS *whitespace*, so bash `read` collapses
   # consecutive tabs and empty fields shift everything left (a missing context %
   # once rendered the 1M window size as "1000000%"). Non-whitespace delimiters
   # preserve empty fields.
   IFS=$'\x1f' read -r model five_pct five_reset week_pct week_reset ctx_pct ctx_size \
-    cost_usd dur_ms lines_added lines_removed in_tokens out_tokens cache_read cache_creation transcript_path < <(
+    cost_usd dur_ms lines_added lines_removed in_tokens out_tokens < <(
     printf '%s' "$input" | jq -r '[
       .model.display_name // .model.id // "Claude",
       .rate_limits.five_hour.used_percentage // "",
@@ -610,13 +572,10 @@ main() {
       .cost.total_lines_added // "",
       .cost.total_lines_removed // "",
       .context_window.total_input_tokens // "",
-      .context_window.total_output_tokens // "",
-      .context_window.current_usage.cache_read_input_tokens // "",
-      .context_window.current_usage.cache_creation_input_tokens // "",
-      .transcript_path // ""
+      .context_window.total_output_tokens // ""
     ] | map(tostring) | join("\u001f")' 2>/dev/null
   )
-  transcript_path=${transcript_path%$'\r'}
+  out_tokens=${out_tokens%$'\r'}
 
   # Malformed / empty stdin: jq emits nothing (its parse error is suppressed
   # above so it can't leak into the statusline), `read` leaves every field

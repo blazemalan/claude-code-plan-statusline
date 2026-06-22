@@ -47,19 +47,11 @@ ps-tests under real Windows PowerShell 5.1 and a BOM guard.
    bash `read` collapses empty fields and shifts everything left.
 5. **`PLAN_SL_NOW` env var** pins "now" in both scripts (100% easter-egg flash + the
    week-reset today-vs-weekday check). It exists so tests and the cross-check are
-   deterministic. Keep it working in both implementations. **`PLAN_SL_CACHE_MTIME`**
-   is its sibling for the cache-freshness countdown: it overrides the transcript mtime
-   so the `↯cached M:SS` timer is deterministic in tests + the cross-check (which sets
-   it on every fixture). Keep both working in bash and PS.
+   deterministic. Keep it working in both implementations.
 6. **Locale:** `fmt_cost` pins `LC_ALL=C` *function-scoped* (an inline prefix on
    `printf` does NOT work on bash 3.2). Cross-check runs under `LC_ALL=C`.
 7. **shellcheck** must pass per-file at `-S warning` (CI invokes it per-file because
    shellcheck 0.11 crashes when fed some of these files together).
-8. **Cache-timer mtime: GNU `stat -c %Y` FIRST, then BSD `stat -f %m` as the `||`
-   fallback** — order matters. BSD `stat` rejects `-c` cleanly (non-zero, so `||` falls
-   through), but GNU `stat -f %m` *succeeds with garbage* (it reads filesystem stats),
-   so a BSD-first order would silently break the countdown on Linux. PS reads the anchor
-   via `(Get-Item ...).LastWriteTimeUtc` → `ToUnixTimeSeconds()`.
 
 ## Adding a theme
 
@@ -75,12 +67,6 @@ of the theme contract.
   `0` is present (renders `0%`); only absent/`null` fields are skipped.
 - Plan mode (rate_limits present) and Enterprise dashboard (absent) are mutually
   exclusive; context segment renders in both.
-- Cache-freshness countdown (`↯cached M:SS` → red `↯cold`) renders whenever
-  `current_usage` has cache tokens; it counts down `CACHE_TTL` (300s) from the
-  `transcript_path` file's mtime. `↯` = U+21AF (monochrome, takes the tier color, so
-  the whole segment is one color). Time-based → parity testing pins the anchor with
-  `PLAN_SL_CACHE_MTIME`. Tier colors run inverted vs usage: calm while warm, urgent
-  when cold.
 - Malformed/empty stdin → `Claude │ usage data pending - make a request`, exit 0, silent
   stderr.
 - One line, no trailing newline, UTF-8 (no BOM) bytes on stdout.

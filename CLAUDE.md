@@ -52,6 +52,13 @@ ps-tests under real Windows PowerShell 5.1 and a BOM guard.
    `printf` does NOT work on bash 3.2). Cross-check runs under `LC_ALL=C`.
 7. **shellcheck** must pass per-file at `-S warning` (CI invokes it per-file because
    shellcheck 0.11 crashes when fed some of these files together).
+8. **Cache TTL is NOT a flat 5 minutes.** A cache-freshness countdown (`↯cached`/`↯cold`,
+   PR #26) shipped on that assumption and was reverted: Claude Code on a Pro/Max
+   subscription uses a **1-hour** prompt-cache TTL for the *main* conversation. 5 minutes
+   applies only to API-key/Bedrock/Vertex/Foundry billing, to subagents, and when over
+   the plan limit (drawing on billed credits). See `code.claude.com/docs/en/prompt-caching`
+   (and Claude Code issue #46829 — the TTL has regressed before). Don't re-add a
+   cache-lifetime indicator without deriving the right TTL from stdin or making it configurable.
 
 ## Adding a theme
 

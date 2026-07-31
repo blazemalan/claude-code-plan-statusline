@@ -15,6 +15,7 @@ $script:RAINBOW_SPEED = 1
 $script:_RAINBOW_SGR = ''
 $script:RAINBOW = ''
 $script:SEP_ANIM = '' 
+$script:SEP_ANIM_FRAMES = $null
 
 function date_fmt($epoch, $fmt) {
     # Not used directly in PS, handled locally
@@ -324,10 +325,12 @@ function paint($sgr, $text) {
 
 function paint_sep() {
     if (-not [string]::IsNullOrEmpty($script:SEP_ANIM)) {
-        $frames = $script:SEP_ANIM -split '\|'
+        if ($null -eq $script:SEP_ANIM_FRAMES) {
+            $script:SEP_ANIM_FRAMES = $script:SEP_ANIM -split '\|'
+        }
         $now = now_epoch
-        $idx = $now % $frames.Count
-        return paint $script:SEP_COLOR " $($frames[$idx]) "
+        $idx = $now % $script:SEP_ANIM_FRAMES.Count
+        return paint $script:SEP_COLOR " $($script:SEP_ANIM_FRAMES[$idx]) "
     }
     return paint $script:SEP_COLOR $script:SEP
 }

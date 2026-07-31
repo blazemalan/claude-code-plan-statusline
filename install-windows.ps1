@@ -26,7 +26,7 @@ Write-Host "Installed: $dest"
 # 2. Merge the statusLine entry into settings.json, preserving everything else.
 $settingsPath = Join-Path $env:USERPROFILE '.claude\settings.json'
 $destForward = $dest -replace '\\', '/'
-$command = "powershell -NoProfile -ExecutionPolicy Bypass -File $destForward"
+$command = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$destForward`""
 
 if (Test-Path $settingsPath) {
     $backup = "$settingsPath.bak-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
@@ -51,7 +51,7 @@ $sample = '{"model":{"display_name":"Opus 4.8"},"rate_limits":{"five_hour":{"use
     [DateTimeOffset]::UtcNow.AddDays(3).ToUnixTimeSeconds() + '}},"context_window":{"used_percentage":6,"context_window_size":1000000}}'
 Write-Host ""
 Write-Host "Preview of your statusline:"
-$sample | powershell -NoProfile -ExecutionPolicy Bypass -File $dest
+$sample | powershell -NoProfile -ExecutionPolicy Bypass -File "$dest"
 Write-Host ""
 Write-Host ""
 Write-Host "Done. Start a NEW Claude Code session and send any message - the statusline appears at the bottom." -ForegroundColor Green

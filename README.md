@@ -51,7 +51,7 @@ On Enterprise/managed plans the layout adapts automatically — see [Enterprise 
 
 > Please install the plan-statusline (Windows PowerShell version) from https://github.com/blazemalan/claude-code-plan-statusline for me:
 > 1. Download https://raw.githubusercontent.com/blazemalan/claude-code-plan-statusline/main/statusline.ps1 to `~/.claude/hooks/plan-statusline.ps1`, preserving its UTF-8 BOM.
-> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `powershell -NoProfile -ExecutionPolicy Bypass -File <the absolute path to that file, with forward slashes>`, preserving all existing keys.
+> 2. Add a `statusLine` entry to `~/.claude/settings.json` that runs `powershell -NoProfile -ExecutionPolicy Bypass -File \"<the absolute path to that file, with forward slashes>\"`, preserving all existing keys.
 > Nothing else to install — it's pure PowerShell 5.1+ built-ins.
 
 Claude Code does the file work and the settings edit, asking permission as it goes.
@@ -98,7 +98,7 @@ Then merge this into `%USERPROFILE%\.claude\settings.json`, replacing `YOURNAME`
 {
   "statusLine": {
     "type": "command",
-    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/YOURNAME/.claude/hooks/plan-statusline.ps1"
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/Users/YOURNAME/.claude/hooks/plan-statusline.ps1\""
   }
 }
 ```

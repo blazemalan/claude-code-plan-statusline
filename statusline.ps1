@@ -82,15 +82,9 @@ function fmt_when($epoch) {
     return ''
 }
 
-function truncate_pct($pct) {
-    if ([string]::IsNullOrEmpty($pct)) { return '' }
-    if ($pct -isnot [string]) { $pct = $pct.ToString() }; $idx = $pct.LastIndexOf('.')
-    if ($idx -ge 0) { return $pct.Substring(0, $idx) }
-    return $pct
-}
 
 function ctx_circle($pctraw) {
-    $pct = truncate_pct $pctraw
+    $pct = [string]$pctraw -replace '\..*'
     if ([string]::IsNullOrEmpty($pct)) { return '' }
     $n = 0
     if ([long]::TryParse($pct, [ref]$n)) {
@@ -104,12 +98,12 @@ function ctx_circle($pctraw) {
 }
 
 function limit_pegged() {
-    $five = truncate_pct $script:five_pct
+    $five = [string]$script:five_pct -replace '\..*'
     if (-not [string]::IsNullOrEmpty($five)) {
         $n = 0; if (-not [long]::TryParse($five, [ref]$n)) { $n = 0 }
         if ($n -ge 100) { return $true }
     }
-    $week = truncate_pct $script:week_pct
+    $week = [string]$script:week_pct -replace '\..*'
     if (-not [string]::IsNullOrEmpty($week)) {
         $n = 0; if (-not [long]::TryParse($week, [ref]$n)) { $n = 0 }
         if ($n -ge 100) { return $true }
@@ -333,7 +327,7 @@ function paint_sep() {
 }
 
 function tier_color($pctraw) {
-    $pct = truncate_pct $pctraw
+    $pct = [string]$pctraw -replace '\..*'
     if ([string]::IsNullOrEmpty($pct)) { return '' }
     $n = 0
     if ([long]::TryParse($pct, [ref]$n)) {
@@ -347,7 +341,7 @@ function tier_color($pctraw) {
 
 function cost_tier_color($usd) {
     if ([string]::IsNullOrEmpty($usd)) { return '' }
-    $dollars = truncate_pct $usd
+    $dollars = [string]$usd -replace '\..*'
     if ([string]::IsNullOrEmpty($dollars)) { $dollars = '0' }
     $n = 0
     if ([long]::TryParse($dollars, [ref]$n)) {
@@ -370,7 +364,7 @@ function span_sgr($sgr, $tier) {
 }
 
 function seg_rate($label, $pctraw, $reset_str) {
-    $pct = truncate_pct $pctraw
+    $pct = [string]$pctraw -replace '\..*'
     $n = 0
     if ([long]::TryParse($pct, [ref]$n) -and $n -ge 100) {
         return egg $label $reset_str
@@ -391,7 +385,7 @@ function seg_rate($label, $pctraw, $reset_str) {
 }
 
 function seg_ctx($pctraw, $size) {
-    $pct = truncate_pct $pctraw
+    $pct = [string]$pctraw -replace '\..*'
     $tier = tier_color $pct
     $res = ""
     $res += paint (span_sgr $script:CIRCLE_SGR $tier) (ctx_circle $pct)

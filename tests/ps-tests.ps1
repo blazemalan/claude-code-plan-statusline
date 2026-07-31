@@ -23,22 +23,6 @@ if ($null -eq (Get-Command fmt_size -ErrorAction SilentlyContinue)) {
 
 # --- Test fmt helpers ---
 
-$truncateTests = @(
-    @{in='42.9'; out='42'}
-    @{in='100'; out='100'}
-    @{in='0.5'; out='0'}
-    @{in='.5'; out=''}
-    @{in=''; out=''}
-    @{in=$null; out=''}
-    @{in='no_dot'; out='no_dot'}
-    @{in=42.9; out='42'}
-)
-foreach ($t in $truncateTests) {
-    $res = truncate_pct $t.in
-    if ($res -ne $t.out) { Fail "truncate_pct" "Expected '$($t.out)', got '$res' for $($t.in)" }
-}
-Pass "truncate_pct"
-
 $costTests = @(
     @{in=1.009058; out='$1.01'}
     @{in=0; out='$0.00'}

@@ -63,7 +63,9 @@ is_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
 # Cached in _CACHED_NOW during render_line to avoid redundant process forks.
 now_epoch() {
   if [[ -n "${_CACHED_NOW:-}" ]]; then printf '%s' "$_CACHED_NOW"; return; fi
-  printf '%s' "${PLAN_SL_NOW:-$(date +%s)}"
+  local now="${PLAN_SL_NOW:-$(date +%s)}"
+  is_int "$now" || now=0
+  printf '%s' "$now"
 }
 
 fmt_time() {
@@ -548,6 +550,7 @@ egg() {
 # The one renderer: swept model name, then any present segments joined by SEP.
 render_line() {
   local _CACHED_NOW; _CACHED_NOW="${PLAN_SL_NOW:-$(date +%s)}"
+  is_int "$_CACHED_NOW" || _CACHED_NOW=0
   # shellcheck disable=SC2034 # Read dynamically by fmt_when
   local _CACHED_TODAY; _CACHED_TODAY="$(date_fmt "$_CACHED_NOW" "+%Y-%m-%d")"
 

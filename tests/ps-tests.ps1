@@ -200,6 +200,137 @@ if ($res.out.Contains([char]27)) { Fail "no_color egg" "ANSI ESC leaked" }
 if ($res.out -notmatch 'CODE BLUE' -or $res.out -notmatch 'defib') { Fail "no_color egg" "egg word lost: $($res.out)" }
 Pass "no_color egg"
 
+# --- Model-scoped weekly windows (model_weekly) ---
+# Mirrors the iso_to_epoch / sanitize_label cases in tests/unit.sh one for one;
+# any divergence here is a byte-parity break.
+$isoTests = @(
+    @{in='2026-08-16T03:00:00.336012+00:00'; out='1786849200'}
+    @{in='1970-01-01T00:00:00Z';             out='0'}
+    @{in='2000-02-29T12:00:00Z';             out='951825600'}
+    @{in='2026-08-15T20:00:00-07:00';        out='1786849200'}
+    @{in='2026-08-15T20:00:00-0700';         out='1786849200'}
+    @{in='2026-08-16T08:30:00+05:30';        out='1786849200'}
+    @{in='1999-01-01T00:00:00';              out='915148800'}
+    @{in='1999-01-01 00:00:00';              out='915148800'}
+    @{in='2024-12-31T23:59:59Z';             out='1735689599'}
+    @{in='2026-01-15T00:00:00Z';             out='1768435200'}
+    @{in='2026-02-15T00:00:00Z';             out='1771113600'}
+    @{in='2026-08-09T08:09:08Z';             out='1786262948'}
+    @{in='garbage';                          out=''}
+    @{in='';                                 out=''}
+    @{in=$null;                              out=''}
+    @{in='2026-13-01T00:00:00Z';             out=''}
+    @{in='2026-01-32T00:00:00Z';             out=''}
+    @{in='2026-01-01T24:00:00Z';             out=''}
+    @{in='2026-08-16';                       out=''}
+)
+foreach ($t in $isoTests) {
+    $res = Iso-ToEpoch $t.in
+    if ($res -ne $t.out) { Fail "Iso-ToEpoch" "Expected '$($t.out)', got '$res' for '$($t.in)'" }
+}
+Pass "Iso-ToEpoch"
+
+$lblTests = @(
+    @{in='Fable';               out='fable'}
+    @{in='Opus 4.8';            out='opus 4.8'}
+    @{in='ReallyLongModelName'; out='reallylongmo'}
+    @{in="Ev$([char]27)[31mil"; out='ev31mil'}
+    @{in="a`tb`nc";             out='abc'}
+    @{in='Fable' + [char]0x2122; out='fable'}
+    @{in="$([char]27)]0;x$([char]7)"; out='0x'}
+    @{in='';                    out=''}
+    @{in=$null;                 out=''}
+)
+foreach ($t in $lblTests) {
+    $res = Sanitize-Label $t.in
+    if ($res -ne $t.out) { Fail "Sanitize-Label" "Expected '$($t.out)', got '$res' for '$($t.in)'" }
+}
+Pass "Sanitize-Label"
+
+# End-to-end, with a stand-in for Claude Code's ~/.claude.json.
+function Run-E2E-Scoped($json, $confBody, $scopedJsonPath, $epoch, $tz, $noColor) {
+    $tempHome = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.Guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path "$tempHome/.claude" | Out-Null
+    if ($confBody) { Set-Content -Path "$tempHome/.claude/plan-statusline.conf" -Value $confBody }
+    if ($scopedJsonPath) { Copy-Item $scopedJsonPath "$tempHome/.claude.json" }
+
+    $env:HOME = $tempHome
+    if ($epoch) { $env:PLAN_SL_NOW = $epoch } else { Remove-Item Env:\PLAN_SL_NOW -ErrorAction SilentlyContinue }
+    if ($tz) { $env:TZ = $tz } else { Remove-Item Env:\TZ -ErrorAction SilentlyContinue }
+    if ($noColor) { $env:NO_COLOR = $noColor } else { Remove-Item Env:\NO_COLOR -ErrorAction SilentlyContinue }
+
+    $pwsh = if ($PSVersionTable.PSVersion.Major -ge 6) { "pwsh" } else { "powershell" }
+    $inFile = [System.IO.Path]::Combine($tempHome, "in.json")
+    $outFile = [System.IO.Path]::Combine($tempHome, "out.txt")
+    $errFile = [System.IO.Path]::Combine($tempHome, "err.txt")
+    Set-Content -Path $inFile -Value $json
+    $proc = Start-Process -FilePath $pwsh -ArgumentList "-NoProfile", "-File", "statusline.ps1" -RedirectStandardInput $inFile -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -Wait
+    $out = ""; $err = ""
+    try { $out = Get-Content $outFile -Raw -Encoding UTF8 } catch {}
+    try { $err = Get-Content $errFile -Raw -Encoding UTF8 } catch {}
+    $exitCode = $proc.ExitCode
+    Remove-Item -Recurse -Force $tempHome
+    return @{out=$out; err=$err; exitCode=$exitCode}
+}
+
+$scopedSrc = Join-Path $PSScriptRoot 'scoped-claude-config.json'
+$planJson = '{"model": {"display_name": "M"}, "rate_limits": {"five_hour": {"used_percentage": 42, "resets_at": 1746234000}, "seven_day": {"used_percentage": 50, "resets_at": 1746500400}}}'
+
+# Off by default even though the file is present and readable.
+$res = Run-E2E-Scoped $planJson "theme=default" $scopedSrc '1786663300' 'UTC' '1'
+if ($res.out -match 'fable') { Fail "model_weekly off" "Rendered while disabled: $($res.out)" }
+Pass "model_weekly off by default"
+
+# On: renders after the all-models week, ISO reset resolves to a weekday.
+$res = Run-E2E-Scoped $planJson "theme=default`nmodel_weekly=on" $scopedSrc '1786663300' 'UTC' '1'
+if ($res.exitCode -ne 0) { Fail "model_weekly on" "exit $($res.exitCode)" }
+if ($res.err) { Fail "model_weekly on" "stderr: $($res.err)" }
+if ($res.out -notmatch 'week: 50%.*fable: 21%') { Fail "model_weekly on" "not rendered after week: $($res.out)" }
+# Must be a real weekday, not just an open paren: 'fable: 21% (' also matches the
+# empty '(->)' clause, which is exactly what the gotcha-10 PS 7 [datetime]
+# regression produced — the whole suite passed while the reset silently vanished.
+if ($res.out -notmatch 'fable: 21% \(\u2192(mon|tue|wed|thu|fri|sat|sun)\)') { Fail "model_weekly on" "reset weekday missing: $($res.out)" }
+if ($res.out -notmatch 'sonnet: 7%') { Fail "model_weekly on" "fractional pct wrong: $($res.out)" }
+if ($res.out -notmatch 'opus31m 4\.8-:') { Fail "model_weekly on" "label not sanitised: $($res.out)" }
+if ($res.out -match 'dropped') { Fail "model_weekly on" "3-record cap not applied: $($res.out)" }
+if ($res.out.Contains([char]27)) { Fail "model_weekly on" "ESC leaked from label under NO_COLOR" }
+Pass "model_weekly on"
+
+# Missing file / malformed file degrade to "segment absent", never a broken line.
+$res = Run-E2E-Scoped $planJson "theme=default`nmodel_weekly=on" $null '1786663300' 'UTC' '1'
+if ($res.exitCode -ne 0 -or $res.err) { Fail "model_weekly missing file" "rc=$($res.exitCode) err=$($res.err)" }
+if ($res.out -notmatch 'week: 50%' -or $res.out -match 'fable') { Fail "model_weekly missing file" "$($res.out)" }
+Pass "model_weekly missing file"
+
+$badDir = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.Guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $badDir | Out-Null
+$badFile = Join-Path $badDir 'bad.json'
+Set-Content -Path $badFile -Value 'not json {'
+$res = Run-E2E-Scoped $planJson "theme=default`nmodel_weekly=on" $badFile '1786663300' 'UTC' '1'
+if ($res.exitCode -ne 0 -or $res.err) { Fail "model_weekly malformed" "rc=$($res.exitCode) err=$($res.err)" }
+if ($res.out -notmatch 'week: 50%' -or $res.out -match 'fable') { Fail "model_weekly malformed" "$($res.out)" }
+Remove-Item -Recurse -Force $badDir
+Pass "model_weekly malformed file"
+
+# Separator injection: a display_name carrying the \x1f/\x1e delimiters the bash
+# side re-splits on used to forge extra windows there (with an attacker-chosen
+# 100% that fired the pegged egg) while this implementation rendered one. Both
+# must now render exactly one window at the real percentage.
+$injSrc = Join-Path $PSScriptRoot 'scoped-injection.json'
+$res = Run-E2E-Scoped $planJson "theme=default`nmodel_weekly=on" $injSrc '1786663300' 'UTC' '1'
+if ($res.exitCode -ne 0 -or $res.err) { Fail "model_weekly injection" "rc=$($res.exitCode) err=$($res.err)" }
+if ($res.out -match '100%' -or $res.out -match 'respawn') { Fail "model_weekly injection" "forged window: $($res.out)" }
+if ($res.out -notmatch 'fable999inje: 21%') { Fail "model_weekly injection" "real window lost: $($res.out)" }
+if (($res.out -split [char]0x2502).Count -ne 4) { Fail "model_weekly injection" "expected exactly one scoped segment: $($res.out)" }
+if ($res.out -match '\p{Cc}' -and $res.out -notmatch '^[^\p{Cc}]*\n?$') { Fail "model_weekly injection" "control byte reached stdout" }
+Pass "model_weekly separator injection"
+
+# Enterprise payloads carry no rate_limits, so plan-mode segments stay out.
+$entJson = '{"model": {"display_name": "M"}, "cost": {"total_cost_usd": 1.01}}'
+$res = Run-E2E-Scoped $entJson "theme=default`nmodel_weekly=on" $scopedSrc '1786663300' 'UTC' '1'
+if ($res.out -match 'fable') { Fail "model_weekly enterprise" "leaked into Enterprise mode: $($res.out)" }
+Pass "model_weekly absent in Enterprise mode"
+
 if ($script:Failed) {
     exit 1
 }

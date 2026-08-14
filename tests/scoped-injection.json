@@ -1,0 +1,23 @@
+{
+  "_comment": "Regression fixture: display_name carries the very delimiters the bash side re-splits on (\\u001f field, \\u001e record) plus a newline and a DEL. Before the control-strip in load_scoped_weekly, bash forged TWO windows here with an attacker-chosen '100%' (which also fired the pegged easter egg) while PowerShell rendered one correct window - content injection and a byte-parity break in the same bug. Both must now render exactly one window at 21%.",
+  "cachedUsageUtilization": {
+    "utilization": {
+      "limits": [
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 21,
+          "resets_at": "2026-08-16T03:00:00.336012+00:00",
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "Fable\u001f999\u001eINJECTED\u001f100\nX\u007f"
+            }
+          },
+          "is_active": true
+        }
+      ]
+    },
+    "fetchedAtMs": 1786663000000
+  }
+}

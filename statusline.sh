@@ -23,6 +23,11 @@
 # many hues the gradient drifts per repaint (~1×/sec; larger N travels more color
 # per second, not smoother — the line repaints at most once a second).
 #
+# An optional 'model_weekly=on' line adds the per-model weekly windows that
+# /usage shows as "Current week (Fable)". These are NOT in the statusline stdin
+# payload, so that one segment — and only that segment — reads Claude Code's own
+# local config file. Off by default; see load_scoped_weekly() for the details.
+#
 # Honors NO_COLOR (https://no-color.org): if NO_COLOR is set to any non-empty
 # value, all ANSI color/style is suppressed; the line is plain text (glyphs and
 # layout unchanged).
@@ -101,6 +106,54 @@ fmt_duration() {
   fi
 }
 
+# ISO-8601 -> epoch seconds, computed arithmetically instead of shelling out to
+# date(1). Every other timestamp in the payload is already an epoch; only the
+# model-scoped windows carry ISO strings, and BSD date (macOS) rejects both the
+# fractional seconds and the colon in "+00:00" that GNU date accepts. Doing the
+# civil-date math inline sidesteps that split entirely AND keeps this
+# byte-identical with the PowerShell port, which is the harder constraint.
+# Accepts 2026-08-16T03:00:00[.ffffff][Z|+HH:MM|-HHMM]; a missing offset is UTC,
+# matching the server. Prints nothing when the string doesn't parse.
+iso_to_epoch() {
+  local s=$1
+  [[ -z "$s" ]] && return
+  local LC_ALL=C
+  [[ "$s" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt\ ]([0-9]{2}):([0-9]{2}):([0-9]{2}) ]] || return
+  # 10# forces base-10: "08"/"09" are invalid octal and would abort the arithmetic.
+  local Y=$((10#${BASH_REMATCH[1]})) M=$((10#${BASH_REMATCH[2]})) D=$((10#${BASH_REMATCH[3]}))
+  local h=$((10#${BASH_REMATCH[4]})) mi=$((10#${BASH_REMATCH[5]})) se=$((10#${BASH_REMATCH[6]}))
+  # Y is bounded too: an unbounded year yields an epoch outside the range
+  # [DateTimeOffset]::FromUnixTimeSeconds accepts, and PowerShell's fmt_when
+  # would throw — writing to stderr, which this script must never do.
+  (( Y >= 1970 && Y <= 2200 )) || return
+  (( M >= 1 && M <= 12 && D >= 1 && D <= 31 && h <= 23 && mi <= 59 && se <= 60 )) || return
+  local off=0
+  if [[ "$s" =~ ([+-])([0-9]{2}):?([0-9]{2})$ ]]; then
+    off=$(( (10#${BASH_REMATCH[2]} * 3600) + (10#${BASH_REMATCH[3]} * 60) ))
+    [[ "${BASH_REMATCH[1]}" == "-" ]] && off=$(( 0 - off ))
+  fi
+  # days_from_civil (Howard Hinnant): exact for any proleptic-Gregorian date,
+  # no leap-year table, integer-only — so bash and PowerShell agree bit for bit.
+  local y=$Y
+  (( M <= 2 )) && y=$(( y - 1 ))
+  local era=$(( (y >= 0 ? y : y - 399) / 400 ))
+  local yoe=$(( y - era * 400 ))
+  local doy=$(( (153 * (M + (M > 2 ? -3 : 9)) + 2) / 5 + D - 1 ))
+  local doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+  local days=$(( era * 146097 + doe - 719468 ))
+  printf '%s' $(( days * 86400 + h * 3600 + mi * 60 + se - off ))
+}
+
+# The scoped window's label is server-supplied text that lands in the user's
+# terminal, so it is reduced to a safe subset (no ESC, no control bytes, no
+# multibyte) and bounded before it is ever painted. Empty result = unrenderable.
+sanitize_label() {
+  local LC_ALL=C s=$1
+  s=${s//[^A-Za-z0-9 ._-]/}
+  s=${s:0:12}
+  printf '%s' "$s" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
 fmt_when() {
   local epoch=$1
   [[ -z "$epoch" ]] && return
@@ -125,13 +178,22 @@ ctx_circle() {
   fi
 }
 
-# True when either rate limit is pegged at 100% — drives each theme's
+# True when any rate limit is pegged at 100% — drives each theme's
 # 100% easter egg state (flatline, burnout, game over, skull).
 limit_pegged() {
   local f=0 w=0
   [[ -n "$five_pct" ]] && f="${five_pct%.*}" && { is_int "$f" || f=0; }
   [[ -n "$week_pct" ]] && w="${week_pct%.*}" && { is_int "$w" || w=0; }
-  (( f >= 100 || w >= 100 ))
+  (( f >= 100 || w >= 100 )) && return 0
+  # An exhausted model-scoped week blocks real work too, so it pegs the same way
+  # (inert unless model_weekly is on — scoped_records is empty otherwise).
+  local _l _p _r
+  while IFS=$'\x1f' read -r _l _p _r; do
+    [[ -z "$_p" ]] && continue
+    _p=${_p%.*}; is_int "$_p" || _p=0
+    (( _p >= 100 )) && return 0
+  done <<< "${scoped_records//$'\x1e'/$'\n'}"
+  return 1
 }
 
 # Render the model name in the theme's solid NAME_SGR (empty -> terminal default
@@ -336,6 +398,11 @@ theme_catppuccin() {         # Catppuccin Mocha — soft pastels
 # Shared renderer
 # ============================================================================
 
+# Model-scoped weekly windows: \x1f-joined fields, \x1e-joined records (same
+# reasoning as the stdin join — see main()). Empty unless model_weekly is on.
+scoped_records=''
+MODEL_WEEKLY=0
+
 # Rainbow Road: a global hue cursor (_HUE) advances once per painted unit so the
 # colors sweep along the line; RAINBOW_PHASE (now_epoch × speed, set in render_line)
 # offsets the wheel each repaint so the rainbow flows. Only the 'rainbow' theme sets
@@ -508,6 +575,18 @@ render_line() {
     # Plan mode (Pro/Max): rolling rate-limit windows.
     [[ -n "$five_pct" ]] && { paint_sep; seg_rate '5h' "$five_pct" "$(fmt_time "$five_reset")"; }
     [[ -n "$week_pct" ]] && { paint_sep; seg_rate 'week' "$week_pct" "$(fmt_when "$week_reset")"; }
+    # Per-model weekly windows, after the all-models week they subdivide. Opt-in;
+    # scoped_records is empty otherwise, so this loop costs nothing. A here-string
+    # (not a pipe) keeps the loop in this shell — a subshell would discard the
+    # rainbow theme's _HUE advance and desync the gradient.
+    if [[ -n "$scoped_records" ]]; then
+      local _lbl _pct _rst
+      while IFS=$'\x1f' read -r _lbl _pct _rst; do
+        _lbl=$(sanitize_label "$_lbl")
+        [[ -z "$_lbl" || -z "$_pct" ]] && continue
+        paint_sep; seg_rate "$_lbl" "$_pct" "$(fmt_when "$(iso_to_epoch "$_rst")")"
+      done <<< "${scoped_records//$'\x1e'/$'\n'}"
+    fi
   else
     # Enterprise/managed mode: no rate windows exist in the payload. Show a
     # session dashboard — each segment only if its data is present. Cost
@@ -529,6 +608,95 @@ render_line() {
 }
 
 # ============================================================================
+# Model-scoped weekly windows (opt-in)
+# ============================================================================
+
+# /usage shows a per-model weekly bar ("Current week (Fable)") that is often the
+# binding limit — 21% scoped vs 13% all-models on the session that prompted this.
+# Claude Code does NOT hand it to statuslines: as of v2.1.231 the payload builder
+# copies only rate_limits.five_hour and .seven_day, which a live stdin capture
+# confirms. The number does exist locally, in Claude Code's own config file, so
+# this ONE segment reads that file.
+#
+# That is a deliberate, bounded exception to the stdin-only contract, which is
+# why it is off by default and gated behind `model_weekly = on`. It keeps the
+# part of the contract that protects users — still no network, no auth, no
+# credential access — and touches exactly one key. It gives up the part that
+# makes the contract cheap to verify, and it depends on an internal file with no
+# compatibility promise: if Anthropic renames these fields the segment silently
+# disappears rather than breaking the line. Every failure path (file absent,
+# unreadable, key gone, torn write mid-read, invalid JSON) lands there.
+#
+# Migration: when statusline stdin gains these windows, parse them from stdin,
+# prefer that over the file, and flip the default on.
+load_scoped_weekly() {
+  (( MODEL_WEEKLY )) || return 0
+  # Claude Code resolves <config-dir>/.config.json first, then the legacy
+  # <CLAUDE_CONFIG_DIR|HOME>/.claude.json. Mirror that order.
+  local dir="${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}" f
+  if [[ -f "$dir/.config.json" ]]; then
+    f="$dir/.config.json"
+  else
+    f="${CLAUDE_CONFIG_DIR:-${HOME:-}}/.claude.json"
+  fi
+  # -f as well as -r: a FIFO at this path would block the read forever and hang
+  # the statusline. Only a regular file is ever read.
+  [[ -f "$f" && -r "$f" ]] || return 0
+  # `is_active`/`severity` are deliberately ignored — the bar is worth showing
+  # whether or not the server flags it as the currently binding one. Capped at 3
+  # records so a surprise server change can't run away with the line.
+  #
+  # Every field is stripped of control characters BEFORE the join, because
+  # \x1f/\x1e are exactly the delimiters used here and the values are
+  # server-supplied: a display_name containing one would split a single window
+  # into several segments with attacker-chosen percentages (an injected "100%"
+  # even fires the pegged easter egg), while PowerShell — which keeps a real
+  # array and never re-splits — rendered one correct segment. Content injection
+  # AND a parity break, so it is fixed at the source. Stripping also drops
+  # newlines, which would otherwise break the record loop's here-string.
+  # Mirrored by Strip-Controls in statusline.ps1.
+  #
+  # Every field is type-pinned rather than blindly stringified, because jq and
+  # .NET disagree on how to render anything that isn't a plain string or number
+  # (jq keeps the JSON literal "1E+2" where .NET prints "100"; jq's // treats
+  # `false` as absent where PowerShell's null check does not; a nested object
+  # stringifies differently again). `+ 0` forces jq to re-render numbers in the
+  # same normalised form .NET produces, and percent must then look like a plain
+  # decimal of at most three integer digits or it is dropped. That bound is what
+  # keeps the line sane: a 400-digit percent otherwise rendered in full, and a
+  # value whose control characters were just stripped could splice into an
+  # absurd number ("21\n99" -> "2199%"). Real percentages are 0-100.
+  # Freshness gate, mirroring Claude Code's own rule for this cache: it refreshes
+  # the file during normal use (throttled to at most once every 5 minutes) and
+  # stops trusting it past an hour. Anything older — or stamped in the future,
+  # which means a clock jump — is dropped rather than shown as if current. A
+  # missing/!number fetchedAtMs is treated the same way: freshness can't be
+  # established, so nothing renders. This is a visibility gate, NOT a countdown:
+  # see gotcha 8 for why a freshness timer was reverted and stays gone.
+  scoped_records=$(jq -r --argjson now "$(now_epoch)" '
+    (.cachedUsageUtilization // {}) as $c
+    | (($now * 1000) - ($c.fetchedAtMs // -1)) as $age
+    | if ($c.fetchedAtMs | type) != "number" or $age < 0 or $age > 3600000 then []
+      else ($c.utilization.limits? // []) end
+    | if type == "array" then . else [] end
+    | map(select(type == "object" and .kind == "weekly_scoped"))
+    | .[:3]
+    | map([ ((try .scope.model.display_name catch null)
+              | if type == "string" then . else "" end
+              | gsub("[[:cntrl:]]"; "")),
+            ((try .percent catch null)
+              | if type == "number" then . + 0 | tostring
+                elif type == "string" then .
+                else "" end
+              | gsub("[[:cntrl:]]"; "")
+              | if test("^-?[0-9]{1,3}([.][0-9]{1,6})?$") then . else "" end),
+            ((try .resets_at catch null)
+              | if type == "string" then . else "" end
+              | gsub("[[:cntrl:]]"; "")) ] | join("\u001f"))
+    | join("\u001e")' "$f" 2>/dev/null) || scoped_records=''
+}
+
+# ============================================================================
 # main — only runs when executed, not when sourced
 # ============================================================================
 
@@ -539,13 +707,27 @@ main() {
   theme=default
   config_file="${HOME}/.claude/plan-statusline.conf"
   if [[ -f "$config_file" ]]; then
-    while IFS='=' read -r key value; do
-      key=${key// /}
-      value=${value// /}
+    # `|| [[ -n "$key" ]]` keeps the final line when the file has no trailing
+    # newline: `read` fills the variables but returns non-zero at EOF, so a
+    # plain `while read` would silently drop it. PowerShell's Get-Content DOES
+    # return that line, so without this the two implementations disagree
+    # whenever the last setting isn't newline-terminated — which many editors
+    # do by default. Parity bug, not a style nit.
+    while IFS='=' read -r key value || [[ -n "$key" ]]; do
+      # Strip CR as well as spaces: PowerShell's Get-Content drops the CR of a
+      # CRLF-saved conf file and bash's read does not, so without this a conf
+      # saved on Windows sets theme="scrubs\r" here and "scrubs" there.
+      key=${key// /}; key=${key%$'\r'}
+      value=${value// /}; value=${value%$'\r'}
       value=${value%\"}; value=${value#\"}
       case "$key" in
         theme) [[ -n "$value" ]] && theme="$value" ;;
         rainbow_speed) [[ "$value" =~ ^[0-9]+$ ]] && (( value >= 1 )) && RAINBOW_SPEED="$value" ;;
+        model_weekly)
+          case "$(printf '%s' "$value" | LC_ALL=C tr '[:upper:]' '[:lower:]')" in
+            on|true|1|yes) MODEL_WEEKLY=1 ;;
+          esac
+          ;;
       esac
     done < "$config_file"
   fi
@@ -576,6 +758,11 @@ main() {
     ] | map(tostring) | join("\u001f")' 2>/dev/null
   )
   out_tokens=${out_tokens%$'\r'}
+
+  # Loaded only now, and only in plan mode: the scoped segment renders inside the
+  # rate-limit branch, so loading it for an Enterprise payload would let
+  # limit_pegged dim the model name with no visible segment to explain why.
+  [[ -n "$five_pct" || -n "$week_pct" ]] && load_scoped_weekly
 
   # Malformed / empty stdin: jq emits nothing (its parse error is suppressed
   # above so it can't leak into the statusline), `read` leaves every field

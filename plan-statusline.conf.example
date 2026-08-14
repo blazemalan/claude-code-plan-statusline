@@ -6,3 +6,12 @@ theme = default
 
 # Only affects the "rainbow" theme. Sets the drift pace (integer >= 1, default is 1).
 # rainbow_speed = 1
+
+# Show the per-model weekly limits that /usage lists as "Current week (Fable)".
+# These are often the limit you actually hit first, but Claude Code does not put
+# them in the statusline data, so this is the one setting that reads Claude Code's
+# own local config file (~/.claude.json) instead of stdin. Still no network and no
+# login — but it is off by default, and it leans on an internal file Anthropic
+# makes no promises about: if the format changes the segment just disappears.
+# Accepts on / true / 1 / yes.
+# model_weekly = on

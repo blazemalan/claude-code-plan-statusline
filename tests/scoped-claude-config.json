@@ -1,0 +1,88 @@
+{
+  "_comment": "Stand-in for Claude Code's ~/.claude.json, used by the model_weekly tests. Deliberately NOT in fixtures/ \u2014 that directory is globbed as stdin payloads. Trimmed to the one key the statusline reads, then loaded with edge cases: a normal bucket, an ANSI-injecting + overlong label, a fractional percent with a null reset, and a fourth scoped bucket that must be dropped by the 3-record cap.",
+  "cachedUsageUtilization": {
+    "fetchedAtMs": 1786663000000,
+    "utilization": {
+      "five_hour": {
+        "utilization": 9,
+        "resets_at": "2026-08-14T03:40:00.335797+00:00"
+      },
+      "seven_day": {
+        "utilization": 13,
+        "resets_at": "2026-08-16T03:00:00.335818+00:00"
+      },
+      "seven_day_opus": null,
+      "seven_day_sonnet": null,
+      "limits": [
+        {
+          "kind": "session",
+          "group": "session",
+          "percent": 9,
+          "resets_at": "2026-08-14T03:40:00.335797+00:00",
+          "scope": null,
+          "is_active": false
+        },
+        {
+          "kind": "weekly_all",
+          "group": "weekly",
+          "percent": 13,
+          "resets_at": "2026-08-16T03:00:00.335818+00:00",
+          "scope": null,
+          "is_active": false
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 21,
+          "resets_at": "2026-08-16T03:00:00.336012+00:00",
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "Fable"
+            }
+          },
+          "is_active": true
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 100,
+          "resets_at": "2026-08-15T20:00:00-07:00",
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "Opus\u001b[31m 4.8-VeryLongName"
+            }
+          },
+          "is_active": false
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 7.6,
+          "resets_at": null,
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "Sonnet"
+            }
+          },
+          "is_active": false
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 55,
+          "resets_at": "2026-08-16T03:00:00+00:00",
+          "scope": {
+            "model": {
+              "id": null,
+              "display_name": "DroppedByCap"
+            }
+          },
+          "is_active": false
+        }
+      ]
+    }
+  }
+}

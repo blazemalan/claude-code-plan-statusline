@@ -115,6 +115,74 @@ theme_default
 [[ "$(fmt_duration 3660000)" == "1h1m" ]] && ok "fmt_duration: 3660000ms -> 1h1m" || bad "fmt_duration: 3660000ms -> 1h1m"
 [[ "$(fmt_duration 7260000)" == "2h1m" ]] && ok "fmt_duration: 7260000ms -> 2h1m" || bad "fmt_duration: 7260000ms -> 2h1m"
 
+# ── iso_to_epoch ─────────────────────────────────────────────────────────────
+# Only the model-scoped weekly windows carry ISO timestamps; everything else in
+# the payload is already an epoch. Expected values are Python's
+# datetime.fromisoformat(...).timestamp(), so this also pins the leap-year and
+# offset math that bash/PowerShell must agree on.
+iso_eq() { # LABEL INPUT EXPECTED
+  local got; got=$(iso_to_epoch "$2")
+  [[ "$got" == "$3" ]] && ok "iso_to_epoch: $1" || bad "iso_to_epoch: $1 (got '$got', want '$3')"
+}
+iso_eq "utc with microseconds" "2026-08-16T03:00:00.336012+00:00" "1786849200"
+iso_eq "Z suffix"              "1970-01-01T00:00:00Z"             "0"
+iso_eq "leap day"              "2000-02-29T12:00:00Z"             "951825600"
+iso_eq "negative offset"       "2026-08-15T20:00:00-07:00"        "1786849200"
+iso_eq "offset without colon"  "2026-08-15T20:00:00-0700"         "1786849200"
+iso_eq "positive offset"       "2026-08-16T08:30:00+05:30"        "1786849200"
+iso_eq "no offset means utc"   "1999-01-01T00:00:00"              "915148800"
+iso_eq "space separator"       "1999-01-01 00:00:00"              "915148800"
+iso_eq "end of 2024"           "2024-12-31T23:59:59Z"             "1735689599"
+# Non-March-anchored months exercise the other branch of days_from_civil.
+iso_eq "january"               "2026-01-15T00:00:00Z"             "1768435200"
+iso_eq "february"              "2026-02-15T00:00:00Z"             "1771113600"
+# Unparseable input yields nothing, which renders as the same "(→)" the payload
+# already produces for a rate limit with no resets_at.
+iso_eq "garbage"        "garbage"                ""
+iso_eq "empty"          ""                       ""
+iso_eq "month out of range" "2026-13-01T00:00:00Z" ""
+iso_eq "day out of range"   "2026-01-32T00:00:00Z" ""
+iso_eq "hour out of range"  "2026-01-01T24:00:00Z" ""
+iso_eq "date only"          "2026-08-16"           ""
+# "08"/"09" are invalid octal; without a 10# prefix these abort the arithmetic.
+iso_eq "octal-looking fields" "2026-08-09T08:09:08Z" "1786262948"
+
+# ── sanitize_label ───────────────────────────────────────────────────────────
+# display_name is server-supplied and lands in the user's terminal.
+lbl_eq() { # LABEL INPUT EXPECTED
+  local got; got=$(sanitize_label "$2")
+  [[ "$got" == "$3" ]] && ok "sanitize_label: $1" || bad "sanitize_label: $1 (got '$got', want '$3')"
+}
+lbl_eq "plain name lowercased" "Fable" "fable"
+lbl_eq "digits and dot kept"   "Opus 4.8" "opus 4.8"
+lbl_eq "truncates to 12"       "ReallyLongModelName" "reallylongmo"
+lbl_eq "strips ANSI escape"    "$(printf 'Ev\033[31mil')" "ev31mil"
+lbl_eq "strips control bytes"  "$(printf 'a\tb\nc')" "abc"
+lbl_eq "strips multibyte"      "Fable™" "fable"
+lbl_eq "empty stays empty"     "" ""
+# An OSC title-set sequence keeps only its safe characters — the ESC, ']', ';'
+# and BEL that would actually retitle the user's terminal are all dropped.
+lbl_eq "strips OSC sequence"   "$(printf '\033]0;x\007')" "0x"
+got=$(sanitize_label "AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+[[ ${#got} -le 12 ]] && ok "sanitize_label: length bounded" || bad "sanitize_label: length bounded (${#got})"
+
+# ── limit_pegged also honours scoped windows ─────────────────────────────────
+# shellcheck disable=SC2034  # consumed by the sourced limit_pegged()
+five_pct='' week_pct=''
+scoped_records=$(printf 'fable\x1f21\x1f2026-08-16T03:00:00Z')
+limit_pegged && bad "limit_pegged: scoped below 100" || ok "limit_pegged: scoped below 100"
+scoped_records=$(printf 'fable\x1f100\x1f2026-08-16T03:00:00Z')
+limit_pegged && ok "limit_pegged: scoped at 100" || bad "limit_pegged: scoped at 100"
+# A pegged bucket in a LATER record must still count — the records are \x1e
+# joined, and reading them as one line would only ever inspect the first.
+scoped_records=$(printf 'fable\x1f21\x1fx\x1esonnet\x1f100\x1fy')
+limit_pegged && ok "limit_pegged: scoped 100 in second record" || bad "limit_pegged: scoped 100 in second record"
+scoped_records=$(printf 'fable\x1f99.9\x1fx')
+limit_pegged && bad "limit_pegged: scoped fractional below" || ok "limit_pegged: scoped fractional below"
+# shellcheck disable=SC2034  # consumed by the sourced limit_pegged()
+scoped_records=''
+limit_pegged && bad "limit_pegged: empty scoped" || ok "limit_pegged: empty scoped"
+
 echo
 if (( fails )); then echo "unit: $fails FAILED"; exit 1; fi
 echo "All unit tests passed."

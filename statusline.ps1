@@ -14,7 +14,11 @@ $script:RAINBOW_PHASE = 0
 $script:RAINBOW_SPEED = 1
 $script:_RAINBOW_SGR = ''
 $script:RAINBOW = ''
-$script:SEP_ANIM = '' 
+$script:SEP_ANIM = ''
+# Model-scoped weekly windows: array of @(label, percent, resets_at_iso).
+# Stays empty unless the opt-in model_weekly config key is on.
+$script:scopedWindows = @()
+$script:MODEL_WEEKLY = $false
 
 function date_fmt($epoch, $fmt) {
     # Not used directly in PS, handled locally
@@ -65,6 +69,65 @@ function now_epoch() {
     return [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 }
 
+# ISO-8601 -> epoch seconds. Mirrors bash's iso_to_epoch: the same integer
+# days_from_civil math rather than [DateTimeOffset]::Parse, because the two
+# implementations must agree byte for byte and .NET's parser and BSD/GNU date
+# disagree about fractional seconds and offset formats. A missing offset is UTC.
+# Returns '' when the string does not parse.
+function Iso-ToEpoch($s) {
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    # [0-9], never \d: .NET's \d matches every Unicode decimal digit (Arabic-Indic
+    # U+0660-0669 and friends) where bash's [0-9] matches ASCII only. Such a string
+    # matched here and then threw on the [long] cast — onto stderr, which this
+    # script must never write to — while bash simply declined to parse it.
+    if ($s -notmatch '^([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt ]([0-9]{2}):([0-9]{2}):([0-9]{2})') { return '' }
+    $Y = [long]$matches[1]; $M = [long]$matches[2]; $D = [long]$matches[3]
+    $h = [long]$matches[4]; $mi = [long]$matches[5]; $se = [long]$matches[6]
+    # Y is bounded too: an unbounded year builds an epoch outside the range
+    # [DateTimeOffset]::FromUnixTimeSeconds accepts and fmt_when would throw.
+    if ($Y -lt 1970 -or $Y -gt 2200) { return '' }
+    if ($M -lt 1 -or $M -gt 12 -or $D -lt 1 -or $D -gt 31 -or $h -gt 23 -or $mi -gt 59 -or $se -gt 60) { return '' }
+    # NOTE: the offset match below overwrites $matches, so the fields above are read first.
+    $off = [long]0
+    if ($s -match '([+-])([0-9]{2}):?([0-9]{2})$') {
+        $off = ([long]$matches[2] * 3600) + ([long]$matches[3] * 60)
+        if ($matches[1] -eq '-') { $off = 0 - $off }
+    }
+    $y = $Y
+    if ($M -le 2) { $y = $y - 1 }
+    # Every division here floors, matching bash's truncating integer arithmetic
+    # (PowerShell's '/' yields a double and would round on cast).
+    $era = [long][math]::Floor($y / 400.0)
+    $yoe = $y - ($era * 400)
+    if ($M -gt 2) { $mAdj = -3 } else { $mAdj = 9 }
+    $doy = [long][math]::Floor(((153 * ($M + $mAdj)) + 2) / 5.0) + $D - 1
+    $doe = ($yoe * 365) + [long][math]::Floor($yoe / 4.0) - [long][math]::Floor($yoe / 100.0) + $doy
+    $days = ($era * 146097) + $doe - 719468
+    $epoch = ($days * 86400) + ($h * 3600) + ($mi * 60) + $se - $off
+    return $epoch.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# Drop control characters from a server-supplied field. Mirrors the
+# gsub("[[:cntrl:]]") applied inside load_scoped_weekly's jq filter in
+# statusline.sh, where it is load-bearing: bash re-splits the extracted fields on
+# \x1f/\x1e, so a display_name containing one of those delimiters would forge
+# extra windows with attacker-chosen percentages while this implementation, which
+# keeps a real array, showed a single correct one. Applied here too so both sides
+# see identical field values.
+function Strip-Controls($s) {
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    return [System.Text.RegularExpressions.Regex]::Replace($s, '\p{Cc}', '')
+}
+
+# Bound and de-fang the server-supplied model label before it reaches the
+# terminal (no ESC, no control bytes, no multibyte). Empty = unrenderable.
+function Sanitize-Label($s) {
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    $t = [System.Text.RegularExpressions.Regex]::Replace($s, '[^A-Za-z0-9 ._-]', '')
+    if ($t.Length -gt 12) { $t = $t.Substring(0, 12) }
+    return $t.ToLowerInvariant()
+}
+
 function fmt_when($epoch) {
     if ([string]::IsNullOrEmpty($epoch)) { return '' }
     $n = 0
@@ -112,6 +175,14 @@ function limit_pegged() {
     $week = truncate_pct $script:week_pct
     if (-not [string]::IsNullOrEmpty($week)) {
         $n = 0; if (-not [long]::TryParse($week, [ref]$n)) { $n = 0 }
+        if ($n -ge 100) { return $true }
+    }
+    # An exhausted model-scoped week blocks real work too, so it pegs the same
+    # way (inert unless model_weekly is on - scopedWindows is empty otherwise).
+    foreach ($w in @($script:scopedWindows)) {
+        $p = truncate_pct $w[1]
+        if ([string]::IsNullOrEmpty($p)) { continue }
+        $n = 0; if (-not [long]::TryParse($p, [ref]$n)) { $n = 0 }
         if ($n -ge 100) { return $true }
     }
     return $false
@@ -462,6 +533,12 @@ function render_line() {
             $res += paint_sep
             $res += seg_rate 'week' $script:week_pct (fmt_when $script:week_reset)
         }
+        foreach ($w in @($script:scopedWindows)) {
+            $lbl = Sanitize-Label $w[0]
+            if ([string]::IsNullOrEmpty($lbl) -or [string]::IsNullOrEmpty($w[1])) { continue }
+            $res += paint_sep
+            $res += seg_rate $lbl $w[1] (fmt_when (Iso-ToEpoch $w[2]))
+        }
     } else {
         if (-not [string]::IsNullOrEmpty($script:cost_usd)) {
             $res += paint_sep
@@ -495,6 +572,114 @@ function render_line() {
     }
 
     return $res
+}
+
+# /usage shows a per-model weekly bar ("Current week (Fable)") that is often the
+# binding limit. Claude Code does NOT hand it to statuslines - as of v2.1.231 the
+# payload builder copies only rate_limits.five_hour and .seven_day - so this ONE
+# segment reads Claude Code's own local config file instead. That is a deliberate,
+# bounded exception to the stdin-only contract, which is why it is off by default
+# and gated behind `model_weekly = on`. Still no network, no auth, no credentials.
+# Any failure (file absent, key renamed, torn write, invalid JSON) leaves the list
+# empty and the segment simply does not render. See statusline.sh for the full
+# rationale and the migration path once stdin carries these windows.
+function Load-ScopedWeekly() {
+    if (-not $script:MODEL_WEEKLY) { return }
+    # Plan mode only: the segment renders inside the rate-limit branch, so
+    # loading it for an Enterprise payload would let limit_pegged dim the model
+    # name with no visible segment to explain why.
+    if ([string]::IsNullOrEmpty($script:five_pct) -and [string]::IsNullOrEmpty($script:week_pct)) { return }
+    $homeDir = if (-not [string]::IsNullOrEmpty($env:HOME)) { $env:HOME } else { $env:USERPROFILE }
+    if ([string]::IsNullOrEmpty($homeDir)) { return }
+    # Claude Code resolves <config-dir>/.config.json first, then the legacy
+    # <CLAUDE_CONFIG_DIR|HOME>/.claude.json. Mirror that order.
+    $dir = $env:CLAUDE_CONFIG_DIR
+    if ([string]::IsNullOrEmpty($dir)) { $dir = Join-Path $homeDir '.claude' }
+    $f = Join-Path $dir '.config.json'
+    if (-not (Test-Path $f -PathType Leaf)) {
+        $base = $env:CLAUDE_CONFIG_DIR
+        if ([string]::IsNullOrEmpty($base)) { $base = $homeDir }
+        $f = Join-Path $base '.claude.json'
+    }
+    if (-not (Test-Path $f -PathType Leaf)) { return }
+    try {
+        # -Encoding UTF8 is mandatory: PS 5.1 would otherwise read this UTF-8
+        # file in the legacy ANSI codepage and mangle non-ASCII model names.
+        $rawCfg = Get-Content $f -Raw -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($rawCfg)) { return }
+        $cfg = ConvertFrom-Json $rawCfg -ErrorAction Stop
+        if ($null -eq $cfg.cachedUsageUtilization) { return }
+        # Freshness gate, mirroring Claude Code's own rule for this cache: it is
+        # refreshed during normal use (throttled to at most once every 5 minutes)
+        # and Claude Code stops trusting it past an hour. Anything older - or
+        # stamped in the future, meaning a clock jump - is dropped rather than
+        # shown as if current, as is a missing/non-numeric stamp. A visibility
+        # gate, NOT a countdown (gotcha 8). Mirrors the jq filter in statusline.sh.
+        $fa = $cfg.cachedUsageUtilization.fetchedAtMs
+        if ($fa -isnot [int] -and $fa -isnot [long] -and $fa -isnot [double] -and $fa -isnot [decimal]) { return }
+        $age = ([double](now_epoch) * 1000) - [double]$fa
+        if ($age -lt 0 -or $age -gt 3600000) { return }
+        if ($null -eq $cfg.cachedUsageUtilization.utilization) { return }
+        $limits = $cfg.cachedUsageUtilization.utilization.limits
+        # An object rather than an array is not a limits list: jq's iteration and
+        # PowerShell's single-element wrap would disagree about what it contains.
+        if ($null -eq $limits -or $limits -isnot [System.Array]) { return }
+        # `is_active`/`severity` are deliberately ignored - the bar is worth
+        # showing whether or not the server flags it as the binding one. Capped
+        # at 3 so a surprise server change cannot run away with the line.
+        $acc = @()
+        foreach ($l in @($limits)) {
+            if ($acc.Count -ge 3) { break }
+            if ($null -eq $l) { continue }
+            # Per-record guard: without it one malformed entry threw to the outer
+            # catch and discarded EVERY window, where bash dropped only that one.
+            try {
+            # -cne, not -ne: PowerShell's -ne is case-INSENSITIVE, so a kind of
+            # "WEEKLY_SCOPED" rendered here while jq's == rejected it in bash.
+            if ($l.kind -cne 'weekly_scoped') { continue }
+            $nm = ''; $pc = ''; $rs = ''
+            # Type-pinned exactly like the jq filter: only a real JSON string is
+            # a label, only a real number or numeric string is a percentage.
+            # Blind .ToString() diverged from jq on booleans, nested objects and
+            # exponent notation.
+            if ($null -ne $l.scope -and $null -ne $l.scope.model -and $l.scope.model.display_name -is [string]) {
+                $nm = Strip-Controls $l.scope.model.display_name
+            }
+            if ($l.percent -is [string]) {
+                $pc = Strip-Controls $l.percent
+            } elseif ($null -ne $l.percent -and $l.percent -isnot [bool]) {
+                $pc = Strip-Controls $l.percent.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+            }
+            # Bounded to three integer digits, mirroring the jq filter: real
+            # percentages are 0-100, and this is what stops a 400-digit value
+            # from rendering as a 400-character statusline.
+            if ($pc -notmatch '^-?[0-9]{1,3}([.][0-9]{1,6})?$') { $pc = '' }
+            if ($null -ne $l.resets_at) {
+                # PS 7's ConvertFrom-Json rehydrates an ISO-8601 string into a
+                # [datetime] (already shifted to local time); PS 5.1 leaves it a
+                # string. Left alone, PS 7 hands Iso-ToEpoch "08/15/2026 20:00:00",
+                # which it rightly rejects - so the reset clause silently emptied
+                # while bash, reading jq's raw string, rendered the weekday.
+                # Re-canonicalise to a UTC ISO string so both PowerShell versions
+                # and bash agree. Kind=Unspecified is treated as UTC, matching
+                # bash's rule for a timestamp with no offset.
+                if ($l.resets_at -is [datetime]) {
+                    $dt = [datetime]$l.resets_at
+                    if ($dt.Kind -eq [System.DateTimeKind]::Unspecified) {
+                        $dt = [datetime]::SpecifyKind($dt, [System.DateTimeKind]::Utc)
+                    }
+                    $rs = $dt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss+00:00', [System.Globalization.CultureInfo]::InvariantCulture)
+                } elseif ($l.resets_at -is [string]) {
+                    $rs = Strip-Controls $l.resets_at
+                }
+            }
+            $acc += ,@($nm, $pc, $rs)
+            } catch { continue }
+        }
+        $script:scopedWindows = $acc
+    } catch {
+        $script:scopedWindows = @()
+    }
 }
 
 function Main() {
@@ -570,18 +755,24 @@ function Main() {
                         $value = $line.Substring($idx + 1).Replace(' ', '')
                         if ($value.EndsWith('"')) { $value = $value.Substring(0, $value.Length - 1) }
                         if ($value.StartsWith('"')) { $value = $value.Substring(1) }
-                        if ($key -eq 'theme' -and -not [string]::IsNullOrEmpty($value)) {
+                        if ($key -ceq 'theme' -and -not [string]::IsNullOrEmpty($value)) {
                             $theme = $value
                         }
-                        if ($key -eq 'rainbow_speed' -and $value -match '^[0-9]+$') {
+                        if ($key -ceq 'rainbow_speed' -and $value -match '^[0-9]+$') {
                             $sp = 0
                             if ([int]::TryParse($value, [ref]$sp) -and $sp -ge 1) { $script:RAINBOW_SPEED = $sp }
+                        }
+                        if ($key -ceq 'model_weekly' -and -not [string]::IsNullOrEmpty($value)) {
+                            $mw = $value.ToLowerInvariant()
+                            if ($mw -eq 'on' -or $mw -eq 'true' -or $mw -eq '1' -or $mw -eq 'yes') { $script:MODEL_WEEKLY = $true }
                         }
                     }
                 }
             }
         } catch {}
     }
+
+    Load-ScopedWeekly
 
     switch ($theme) {
         'hearth' { Theme-Hearth }

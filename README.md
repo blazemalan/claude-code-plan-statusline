@@ -14,7 +14,7 @@ A tiny [Claude Code](https://www.anthropic.com/claude-code) statusline that keep
 - **Pro, Max, and Enterprise** — auto-detects your plan: rate-limit windows on Pro/Max, a session dashboard (cost · duration · tokens) on managed/Enterprise plans that have no windows.
 - **Per-chat context gauge** — how full the current conversation's context window is, at a glance.
 - **Twelve built-in themes** — including animated ones (slime drips; rainbow flows) and four ported from Oh My Posh palettes (Dracula, Nord, Gruvbox, Catppuccin) — switch instantly with no restart, or ask Claude Code to invent a new one.
-- **No network, no auth** — reads only the JSON Claude Code already pipes in; never touches your credentials.
+- **No network, no auth** — by default it reads only the JSON Claude Code already pipes in, and it never touches your credentials or makes a request. (One opt-in extra, [per-model weekly limits](#per-model-weekly-limits), reads one key from Claude Code's own local config file; still no network and no auth.)
 - **Portable** — macOS, Linux, WSL, and native Windows. The bash version needs only `jq`; the PowerShell version (`statusline.ps1`) needs **zero installs** (PowerShell 5.1+ built-ins). The two render byte-identical output — a cross-check test diffs them on every fixture.
 
 ## Why plan usage, not dollar cost
@@ -33,6 +33,8 @@ Reading the Pro/Max line left to right:
 - **`○ 6% of 1M`** — context-window fill for *the current chat*. This is **not** a plan limit — it's how much of the model's working memory the conversation has consumed (6% of 1,000,000 tokens here). It only grows as the chat gets longer; starting a new chat clears it. The circle (`○ ◔ ◑ ◕ ●`) is a five-step visual of the same percentage.
 
 All three percentages share one color scale: green → yellow → orange → red as they climb.
+
+Optionally, **`fable: 21% (→sat)`** — the per-model weekly windows `/usage` lists as *"Current week (Fable)"*. Off by default; see [Per-model weekly limits](#per-model-weekly-limits).
 
 On Enterprise/managed plans the layout adapts automatically — see [Enterprise / managed plans](#enterprise--managed-plans).
 
@@ -148,6 +150,30 @@ Once installed, you can change the look in plain English instead of editing file
 
 Claude Code edits `~/.claude/plan-statusline.conf` (or adds a new render function to the script); the change appears within a few seconds, no restart required.
 
+## Per-model weekly limits
+
+`/usage` shows a weekly bar per model — *"Current week (Fable)"* alongside *"Current week (all models)"* — and the per-model one is often the limit you hit first (21% vs 13% on the session that prompted this feature). Enabling it adds a segment after `week`:
+
+```
+Opus 4.8 │ 5h: 42% (→1:00am) │ week: 13% (→sat) │ fable: 21% (→sat) │ ◔ 15% of 1M
+```
+
+Turn it on with a line in `~/.claude/plan-statusline.conf` (`on`, `true`, `1` and `yes` all work):
+
+```ini
+theme = scrubs
+model_weekly = on
+```
+
+**Why it's opt-in.** Every other segment comes from the JSON Claude Code pipes to the statusline on stdin. These windows aren't in it — as of Claude Code v2.1.231 the statusline payload carries only `rate_limits.five_hour` and `rate_limits.seven_day`, which you can confirm by dumping your own stdin. The numbers do exist locally, in Claude Code's own config file (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR` if you've moved it), so this one segment reads that file.
+
+That's a deliberate, bounded exception to the "reads only stdin" rule, and it's worth knowing exactly what you're trading:
+
+- **Unchanged:** no network calls, no authentication, no access to credentials or tokens. It reads one key (`cachedUsageUtilization`) and never emits anything but a percentage, a label, and a reset time.
+- **The catch:** that file is Claude Code's internal state, with no documented format guarantee, and it's refreshed on Claude Code's own schedule — so the number can lag `/usage` slightly. If Anthropic renames the fields, the segment silently disappears; it will never break your statusline. Every failure path (file missing, unreadable, key gone, half-written, invalid JSON) renders nothing and exits 0.
+
+Model labels come from the server, so they're lower-cased, stripped to plain ASCII, capped at 12 characters, and limited to three buckets before rendering. If Claude Code ever adds these windows to the statusline payload, the script will read them from stdin and this setting becomes unnecessary.
+
 ## Enterprise / managed plans
 
 Managed and Enterprise deployments don't receive a `rate_limits` block — there are no rolling plan windows to show. Rather than render blank, the statusline detects this and falls back to a **session dashboard** built from the data those payloads do carry:
@@ -194,5 +220,6 @@ The renderer is data-driven: each theme is just a set of variables consumed by a
 bash tests/unit.sh        # sourceable helpers (formatting, circles, name rendering)
 bash tests/dispatch.sh    # theme dispatch + render faithfulness across themes
 bash tests/enterprise.sh  # Enterprise fallback + plan/enterprise mode exclusivity
-bash tests/robustness.sh  # malformed/partial stdin, config parsing, determinism hook
+bash tests/robustness.sh  # malformed/partial stdin, config parsing, determinism hook,
+                          # per-model weekly windows: gating, failure paths, hostile fields
 pwsh tests/ps-tests.ps

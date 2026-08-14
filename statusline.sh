@@ -63,8 +63,14 @@ is_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
 # Cached in _CACHED_NOW during render_line to avoid redundant process forks.
 now_epoch() {
   if [[ -n "${_CACHED_NOW:-}" ]]; then printf '%s' "$_CACHED_NOW"; return; fi
-  local now="${PLAN_SL_NOW:-$(date +%s)}"
-  is_int "$now" || now=0
+  # PLAN_SL_NOW is validated before use: it reaches arithmetic contexts (the egg
+  # flash's `now % 2`, RAINBOW_PHASE), and under `set -u` a non-numeric value
+  # aborted with "unbound variable" — straight into the rendered line. An invalid
+  # value falls back to the real clock, NOT to 0, because that is what the
+  # PowerShell port does; falling back to 0 made the two disagree on the egg
+  # frame. Byte parity, per gotcha 5.
+  local now="${PLAN_SL_NOW:-}"
+  is_int "$now" || now="$(date +%s)"
   printf '%s' "$now"
 }
 
@@ -549,8 +555,8 @@ egg() {
 
 # The one renderer: swept model name, then any present segments joined by SEP.
 render_line() {
-  local _CACHED_NOW; _CACHED_NOW="${PLAN_SL_NOW:-$(date +%s)}"
-  is_int "$_CACHED_NOW" || _CACHED_NOW=0
+  local _CACHED_NOW; _CACHED_NOW="${PLAN_SL_NOW:-}"
+  is_int "$_CACHED_NOW" || _CACHED_NOW="$(date +%s)"
   # shellcheck disable=SC2034 # Read dynamically by fmt_when
   local _CACHED_TODAY; _CACHED_TODAY="$(date_fmt "$_CACHED_NOW" "+%Y-%m-%d")"
 

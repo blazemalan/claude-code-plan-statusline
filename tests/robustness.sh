@@ -331,6 +331,32 @@ alt2=$(printf '%s' "$PLAN" | TZ=UTC PLAN_SL_NOW=1786663300 HOME="$TMP" CLAUDE_CO
 rm -rf "$ALT"
 rm -f "$TMP/.claude.json" "$TMP/.claude/plan-statusline.conf"
 
+# ── PLAN_SL_NOW validation (#28) ──────────────────────────────────────────────
+# The value reaches arithmetic contexts, where under `set -u` a non-numeric one
+# aborted with "unbound variable" *into the rendered line*. It must be validated,
+# and an invalid value must fall back to the real clock — not to 0 — because that
+# is what the PowerShell port does (parity, gotcha 5).
+PEG='{"model":{"display_name":"M"},"rate_limits":{"five_hour":{"used_percentage":100,"resets_at":1746234000}}}'
+printf 'theme=scrubs\n' > "$TMP/.claude/plan-statusline.conf"
+for v in 'abc' 'x[$(id)]' '1+1' '9e9' '--' '0x10'; do
+  o=$(printf '%s' "$PEG" | TZ=UTC NO_COLOR=1 PLAN_SL_NOW="$v" HOME="$TMP" bash statusline.sh 2>"$TMP/err")
+  r=$?; e=$(cat "$TMP/err")
+  [[ $r -eq 0 ]] || { bad "PLAN_SL_NOW '$v': exit $r"; continue; }
+  [[ -z "$e" ]]  || { bad "PLAN_SL_NOW '$v': stderr leaked: $e"; continue; }
+  [[ "$o" != *'unbound variable'* && "$o" != *'syntax error'* && "$o" != *'statusline.sh:'* ]] \
+    || { bad "PLAN_SL_NOW '$v': shell error leaked into the line: '$o'"; continue; }
+  [[ "$o" == 'M · 5h '* ]] || { bad "PLAN_SL_NOW '$v': line malformed: '$o'"; continue; }
+  ok "PLAN_SL_NOW '$v': validated, line intact"
+done
+# Invalid falls back to the real clock, so a same-day reset still reads as a
+# clock time. Falling back to 0 (epoch 1970) would render a weekday instead.
+soon=$(( $(date +%s) + 3600 ))
+o=$(printf '{"model":{"display_name":"M"},"rate_limits":{"seven_day":{"used_percentage":50,"resets_at":%s}}}' "$soon" \
+     | TZ=UTC NO_COLOR=1 PLAN_SL_NOW='abc' HOME="$TMP" bash statusline.sh 2>/dev/null)
+[[ "$o" == *'m)'* ]] && ok "PLAN_SL_NOW invalid: falls back to real clock, not epoch 0" \
+  || bad "PLAN_SL_NOW invalid: fell back to 0 (got '$o')"
+rm -f "$TMP/.claude/plan-statusline.conf"
+
 echo
 if (( fails )); then echo "robustness: $fails FAILED"; exit 1; fi
 echo "All robustness tests passed."

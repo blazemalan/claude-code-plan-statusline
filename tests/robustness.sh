@@ -169,8 +169,8 @@ run_mw $'theme=default\nmodel_weekly=on'
 [[ "$plain" == *'fable999inje: 21%'* ]] \
   && ok "injection: single window at the real percentage" || bad "injection: got '$plain'"
 # One scoped segment only: count the separators the default theme uses.
-segs=$(printf '%s' "$plain" | awk -F'│' '{print NF}')
-[[ "$segs" == "4" ]] && ok "injection: exactly one scoped segment" || bad "injection: $segs fields, expected 4: '$plain'"
+segs=$(printf '%s' "$plain" | grep -o '│' | wc -l | tr -d '[:space:]')
+[[ "$segs" == "3" ]] && ok "injection: exactly one scoped segment" || bad "injection: $segs separators, expected 3: '$plain'"
 # Checked on the ANSI-stripped line: the theme's own SGR codes are legitimate
 # control bytes, so only what survives colour-stripping can have come from the file.
 if printf '%s' "$plain" | LC_ALL=C grep -q '[[:cntrl:]]'; then bad "injection: control byte reached stdout"; else ok "injection: no control byte on stdout"; fi
@@ -208,7 +208,7 @@ mw_field "year out of range" "[{\"kind\":\"weekly_scoped\",\"percent\":21,\"rese
 mw_field "unicode digits"    "[{\"kind\":\"weekly_scoped\",\"percent\":21,\"resets_at\":\"٢٠٢٦-08-16T03:00:00Z\",\"scope\":$SC}]"
 
 # A 400-digit percent must not become a 400-character statusline.
-big=$(printf '9%.0s' $(seq 1 400))
+big=$(printf '%0400d' 0 | tr '0' '9')
 mw_field "400-digit percent" "[{\"kind\":\"weekly_scoped\",\"percent\":\"$big\",\"resets_at\":null,\"scope\":$SC}]"
 run_mw $'theme=default\nmodel_weekly=on'
 [[ "$plain" != *"$big"* ]] && ok "field: absurd percent dropped, not rendered" || bad "field: absurd percent rendered"
@@ -262,8 +262,10 @@ mw_degrades() { # LABEL
   [[ $rc -eq 0 ]] || { bad "$1: exit $rc"; return; }
   [[ -z "$err" ]] || { bad "$1: stderr leaked: $err"; return; }
   [[ "$plain" == 'M │ 5h: 42% (→'*'week: 50% (→'* ]] || { bad "$1: line malformed: '$plain'"; return; }
-  local n; n=$(printf '%s' "$plain" | awk -F'│' '{print NF}')
-  [[ "$n" == "3" ]] || { bad "$1: expected 3 segments, got $n: '$plain'"; return; }
+  # grep -o on the literal separator, not awk -F: a multibyte field separator is
+  # not portable (it silently misbehaves under Git Bash on the Windows runner).
+  local n; n=$(printf '%s' "$plain" | grep -o '│' | wc -l | tr -d '[:space:]')
+  [[ "$n" == "2" ]] || { bad "$1: expected 2 separators, got $n: '$plain'"; return; }
   ok "$1"
 }
 
@@ -297,13 +299,17 @@ printf '{"cachedUsageUtilization":null}' > "$TMP/.claude.json"
 run_mw $'theme=default\nmodel_weekly=on'
 mw_degrades "model_weekly: null cache"
 
-# Unreadable file (skipped as root, which can read anything).
-if [[ "$(id -u)" != "0" ]]; then
-  cp "$SCOPED_SRC" "$TMP/.claude.json"; chmod 000 "$TMP/.claude.json"
+# Unreadable file. chmod 000 is a no-op for root AND on Windows (Git Bash over
+# NTFS), where the owner can still read the file — so check that the permission
+# actually took effect rather than assuming it, and skip the assertion if not.
+cp "$SCOPED_SRC" "$TMP/.claude.json"; chmod 000 "$TMP/.claude.json" 2>/dev/null
+if [[ -r "$TMP/.claude.json" ]]; then
+  ok "model_weekly: unreadable file (skipped - chmod not enforced here)"
+else
   run_mw $'theme=default\nmodel_weekly=on'
   mw_degrades "model_weekly: unreadable file"
-  chmod 644 "$TMP/.claude.json"
 fi
+chmod 644 "$TMP/.claude.json" 2>/dev/null
 
 # Enterprise payloads have no rate_limits, so plan-mode segments — including
 # this one — stay out of the dashboard. Mode exclusivity is a hard invariant.
